@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Plain fill matching the new shield/lock logo's own card backdrop, so the
+     adaptive-icon background never shows a seam around the foreground artwork
+     regardless of the launcher's mask shape (circle, squircle, rounded square). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/launcherIconBg" />
+</shape>

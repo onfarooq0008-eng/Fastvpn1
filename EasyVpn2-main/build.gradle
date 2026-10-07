@@ -1,0 +1,23 @@
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        // AGP 9 ships built-in Kotlin and pulls in Kotlin Gradle Plugin 2.2.10 by default.
+        // This line keeps the newer Kotlin compiler this project was already using.
+        // (Delete it if you are happy with the Kotlin version AGP brings along.)
+        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0'
+    }
+}
+
+plugins {
+    // AGP 9.0+: fixes Play Console's "Optimized resource shrinking isn't enabled" warning.
+    // The org.jetbrains.kotlin.android plugin is intentionally gone -- AGP 9 compiles
+    // Kotlin itself ("built-in Kotlin") and rejects that plugin with the new DSL.
+    id 'com.android.application' version '9.0.1' apply false
+}
+
+tasks.register('clean', Delete) {
+    delete rootProject.layout.buildDirectory
+}

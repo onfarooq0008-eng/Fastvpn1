@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#2D8CFF</color>
+    <color name="primaryDark">#0A2A66</color>
+    <color name="accent">#22E58B</color>
+    <color name="background">#050B1A</color>
+    <color name="backgroundEnd">#08142E</color>
+    <color name="white">#FFFFFF</color>
+    <color name="black">#F2F6FF</color>
+    <color name="gray">#8FA3C4</color>
+    <color name="cardBackground">#0D182E</color>
+    <color name="rowBackground">#0F1D38</color>
+    <color name="searchBorder">#1E3050</color>
+    <color name="searchBackground">#0D182E</color>
+    <color name="statusOnline">#22E58B</color>
+    <color name="statusOffline">#FF5C5C</color>
+    <color name="statusChecking">#8FA3C4</color>
+    <color name="statusWarn">#FFC107</color>
+    <color name="danger">#FF5C5C</color>
+    <color name="heroStart">#102D67</color>
+    <color name="heroEnd">#1B5CC5</color>
+    <color name="iconCircle">#13233F</color>
+    <color name="onlinePill">#12301F</color>
+    <color name="connectedTint">#0B2A24</color>
+    <color name="divider">#1A2A48</color>
+    <color name="mutedOnPrimary">#BCD3FF</color>
+    <color name="launcherBackground">#00091F</color>
+    <color name="launcherIconBg">#00247A</color>
+    <color name="surfaceSoft">#0F1D38</color>
+    <color name="heroGlow">#2A78EE</color>
+    <color name="ringCyan">#00E5FF</color>
+    <color name="ringGreen">#22E58B</color>
+    <color name="ringBlue">#2D8CFF</color>
+    <color name="gold">#FFB800</color>
+    <color name="signalOff">#2A3B5C</color>
+</resources>

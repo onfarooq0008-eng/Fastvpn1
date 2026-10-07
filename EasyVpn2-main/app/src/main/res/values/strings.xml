@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Fast VPN – Secure &amp; Private</string>
+    <string name="brand_label">FASTVPN</string>
+    <string name="version_footer_format">v%1$s — Fast VPN – Secure &amp; Private</string>
+    <string name="consent_body">FastVPN is committed to protecting your privacy and your data.\n\nWe collect only the minimum information required to provide a safe, stable VPN connection — such as your device\'s encryption key and an assigned connection address. We do not log or store your browsing activity, connection destinations, or online history.</string>
+    <string name="contact_email">admin@fastvpnn.pp.ua</string>
+</resources>

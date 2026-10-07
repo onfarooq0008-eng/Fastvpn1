@@ -1,0 +1,121 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Release signing: reads from keystore.properties (gitignored, never committed).
+// Safe if that file doesn't exist yet -- release builds just won't be signed
+// until you create it (see keystore.properties.example + the README for how
+// to generate a real keystore). This never affects debug builds either way.
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+def keystoreProperties = new Properties()
+def hasSigningConfig = keystorePropertiesFile.exists()
+if (hasSigningConfig) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
+android {
+    namespace 'com.fastvpnn.app'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId "com.fastvpnn.app"
+        minSdk 24
+        targetSdk 36
+        versionCode 4
+        versionName "1.0.4"
+        vectorDrawables { useSupportLibrary true }
+
+        // Baked into every build -- every user of the published app automatically
+        // uses this backend with zero setup on their end. Update this one line
+        // whenever you change which server is your "brain".
+        buildConfigField "String", "DEFAULT_BACKEND_API_URL", "\"https://api.fastvpnn.pp.ua\""
+
+        // The "Go Premium" crown + banner from the new design. There is no paid tier or
+        // billing in the app yet, so they stay hidden. Flip to true once Premium really exists.
+        buildConfigField "boolean", "SHOW_PREMIUM", "false"
+    }
+
+    signingConfigs {
+        if (hasSigningConfig) {
+            release {
+                storeFile rootProject.file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (hasSigningConfig) {
+                signingConfig signingConfigs.release
+            }
+            // Fixes the Play Console warning "contains native code, and you've
+            // not uploaded debug symbols" -- the WireGuard tunnel library ships
+            // native .so files. FULL bundles complete debug symbols into the
+            // AAB automatically so Play Console can symbolicate native crashes/ANRs.
+            ndk {
+                debugSymbolLevel 'FULL'
+            }
+        }
+        debug {
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        viewBinding true
+        buildConfig true
+    }
+
+    packaging {
+        resources {
+            excludes += ['META-INF/DEPENDENCIES']
+        }
+    }
+}
+
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.13.1'
+    implementation 'androidx.appcompat:appcompat:1.8.0'
+    implementation 'com.google.android.material:material:1.12.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+    implementation 'androidx.recyclerview:recyclerview:1.3.2'
+    implementation 'androidx.cardview:cardview:1.0.0'
+    implementation 'androidx.coordinatorlayout:coordinatorlayout:1.2.0'
+    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.11.0'
+    implementation 'androidx.lifecycle:lifecycle-livedata-ktx:2.11.0'
+    // Stable as of 1.1.0 (was pinned to a years-old 1.1.0-alpha06). Note: this
+    // release also deprecates EncryptedSharedPreferences/MasterKey in favor of
+    // DataStore + Tink -- the deprecated APIs are still fully functional here,
+    // but a future migration should account for migrating already-stored keys.
+    implementation 'androidx.security:security-crypto:1.1.0'
+
+    // Official WireGuard userspace backend for Android
+    implementation 'com.wireguard.android:tunnel:1.0.20260102'
+
+    // AdMob
+    implementation 'com.google.android.gms:play-services-ads:25.0.0'
+
+    // JSON parsing
+    implementation 'com.google.code.gson:gson:2.11.0'
+
+    // Networking (fetch remote servers.json, ping)
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+
+    // Coroutines
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0'
+
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+}
