@@ -14,6 +14,7 @@ import org.json.JSONObject
  *  fully functional and migrating would require a data migration for already-stored keys
  *  (so existing installs don't lose their WireGuard identity) -- worth planning as its own
  *  change rather than folding it into an unrelated dependency bump. */
+@Suppress("DEPRECATION")
 class SecureKeyStore(context: Context) {
 
     private val masterKey = MasterKey.Builder(context)

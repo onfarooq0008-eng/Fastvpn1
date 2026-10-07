@@ -401,7 +401,7 @@
                     android:layout_weight="1" android:background="@drawable/bg_tab"
                     android:gravity="center" android:text="All Locations"
                     android:textColor="@color/tab_text_color" android:textSize="14sp"
-                    android:textStyle="bold" android:selected="true" />
+                    android:textStyle="bold" />
                 <TextView
                     android:id="@+id/tabStreaming"
                     android:layout_width="0dp" android:layout_height="match_parent"
