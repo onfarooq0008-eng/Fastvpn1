@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FastVPN — Server Dashboard</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, Roboto, Segoe UI, sans-serif;
+    margin: 0; padding: 16px; background: #f5f7fa; color: #1a1a1a;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .subtitle { color: #8a8a8a; font-size: 13px; margin-bottom: 20px; }
+  .card {
+    background: #fff; border-radius: 14px; padding: 16px;
+    margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+  .stats-row { display: flex; gap: 12px; margin-bottom: 16px; }
+  .stat { flex: 1; text-align: center; }
+  .stat .num { font-size: 26px; font-weight: 700; color: #1565C0; }
+  .stat .label { font-size: 12px; color: #8a8a8a; }
+  .server-row {
+    display: flex; align-items: center; gap: 12px; padding: 12px 0;
+    border-bottom: 1px solid #eee;
+  }
+  .server-row:last-child { border-bottom: none; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .dot.up { background: #2E7D32; }
+  .dot.down { background: #C62828; }
+  .server-info { flex: 1; min-width: 0; }
+  .server-name { font-weight: 600; font-size: 14px; }
+  .server-detail { font-size: 12px; color: #8a8a8a; }
+  .server-count { text-align: right; font-size: 13px; }
+  .server-count .n { font-weight: 700; }
+  .server-count .n.connected { color: #2E7D32; }
+  .server-count .row { margin-bottom: 4px; }
+  .server-count .row:last-child { margin-bottom: 0; }
+  #loginBox { max-width: 420px; margin: 60px auto; text-align: center; }
+  #loginBox input {
+    width: 100%; padding: 12px; font-size: 15px; border-radius: 10px;
+    border: 1px solid #ccc; margin: 12px 0;
+  }
+  #loginBox button, .refresh-btn {
+    background: #1565C0; color: #fff; border: none; border-radius: 10px;
+    padding: 12px 20px; font-size: 15px; cursor: pointer; width: 100%;
+  }
+  .hidden { display: none; }
+  .add-vps-box {
+    background: #1E1E1E; color: #E0E0E0; border-radius: 10px; padding: 14px;
+    font-family: monospace; font-size: 12px; white-space: pre-wrap;
+    word-break: break-all; margin-top: 8px;
+  }
+  .empty-msg { text-align: center; color: #8a8a8a; padding: 24px 0; }
+  .error-msg { color: #C62828; font-size: 13px; margin-top: 8px; }
+  .updated { font-size: 11px; color: #8a8a8a; text-align: center; margin-top: 8px; }
+  #searchBox {
+    width: 100%; padding: 10px 12px; font-size: 14px; border-radius: 10px;
+    border: 1px solid #ddd; margin-bottom: 12px;
+  }
+  .server-row { flex-wrap: wrap; }
+  .capacity-bar {
+    width: 100%; height: 4px; background: #eee; border-radius: 2px;
+    margin-top: 6px; overflow: hidden;
+  }
+  .capacity-fill { height: 100%; background: #1565C0; }
+  .capacity-fill.full { background: #C62828; }
+  .server-actions { width: 100%; display: flex; gap: 8px; margin-top: 8px; }
+  .server-actions button {
+    flex: 1; font-size: 12px; padding: 6px 8px; border-radius: 8px;
+    border: 1px solid #ddd; background: #fafafa; cursor: pointer;
+  }
+  .server-actions button.danger { color: #C62828; border-color: #f0c0c0; }
+  .edit-row { width: 100%; display: none; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .edit-row.open { display: flex; }
+  .edit-row input { flex: 1; min-width: 90px; padding: 6px 8px; font-size: 12px; border-radius: 6px; border: 1px solid #ccc; }
+  .edit-row button { padding: 6px 12px; font-size: 12px; border-radius: 6px; border: none; background: #1565C0; color: #fff; cursor: pointer; }
+  .manual-add-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+  .manual-add-grid input { padding: 10px; font-size: 13px; border-radius: 8px; border: 1px solid #ccc; }
+  @media (max-width: 480px) { .manual-add-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<div id="loginBox">
+  <h1>🌐 FastVPN Dashboard</h1>
+  <p class="subtitle">Enter your admin key (the one setup.sh printed)</p>
+  <input id="adminKeyInput" type="password" placeholder="Admin key" autocomplete="off">
+  <button onclick="login()">View dashboard</button>
+  <div id="loginError" class="error-msg"></div>
+</div>
+
+<div id="dashboard" class="hidden">
+  <h1>🌐 FastVPN Dashboard</h1>
+  <p class="subtitle">Live status of every VPS connected to this brain</p>
+
+  <div class="stats-row">
+    <div class="card stat">
+      <div class="num" id="statServers">-</div>
+      <div class="label">VPS connected</div>
+    </div>
+    <div class="card stat">
+      <div class="num" id="statDevices">-</div>
+      <div class="label">Devices registered</div>
+    </div>
+    <div class="card stat">
+      <div class="num" id="statConnected">-</div>
+      <div class="label">Connected now</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <input id="searchBox" type="text" placeholder="Search by name, country, or city..." oninput="renderDashboard(lastData)">
+    <div id="serverList"></div>
+    <div id="emptyMsg" class="empty-msg hidden">No VPS registered yet. Run setup.sh --role node on one to see it here.</div>
+  </div>
+
+  <div class="card">
+    <strong>Add another VPS</strong>
+    <div class="subtitle" style="margin-top:4px;">Run this on the new VPS (change the country fields):</div>
+    <div class="add-vps-box" id="addVpsCommand"></div>
+    <button class="refresh-btn" id="copyVpsCmdBtn" style="margin-top:8px; background:#333;" onclick="copyAddVpsCommand()">Copy command</button>
+  </div>
+
+  <div class="card">
+    <strong>Add a server manually</strong>
+    <div class="subtitle" style="margin-top:4px;">For servers you're not registering via setup.sh -- e.g. hand-configured WireGuard boxes.</div>
+    <div class="manual-add-grid">
+      <input id="ms-host" placeholder="Endpoint host (IP or domain)">
+      <input id="ms-port" placeholder="Endpoint port" value="51820">
+      <input id="ms-pubkey" placeholder="Server WireGuard public key">
+      <input id="ms-agenturl" placeholder="Agent URL (http://host:port)">
+      <input id="ms-agentkey" placeholder="Agent API key">
+      <input id="ms-country" placeholder="Country name">
+      <input id="ms-cc" placeholder="Country code (2 letters)" maxlength="2">
+      <input id="ms-city" placeholder="City (optional)">
+    </div>
+    <button class="refresh-btn" style="margin-top:10px;" onclick="manualAddServer()">Add server</button>
+    <div class="error-msg" id="manualAddError"></div>
+  </div>
+
+  <div class="updated" id="lastUpdated"></div>
+  <div style="display:flex; gap:8px; margin-top:8px;">
+    <button class="refresh-btn" onclick="refresh()">Refresh now</button>
+    <button class="refresh-btn" style="background:#555;" onclick="logout()">Log out</button>
+  </div>
+</div>
+
+<script type="module">
+  let adminKey = localStorage.getItem('fastvpn_admin_key') || '';
+  let refreshTimer = null;
+  let lastData = { servers: [] };
+
+  if (adminKey) {
+    showDashboard();
+  }
+
+  window.login = function () {
+    const input = document.getElementById('adminKeyInput').value.trim();
+    if (!input) return;
+    adminKey = input;
+    localStorage.setItem('fastvpn_admin_key', adminKey);
+    showDashboard();
+  };
+
+  async function authHeaders() {
+    return { 'X-Admin-Key': adminKey };
+  }
+
+  function showDashboard() {
+    document.getElementById('loginBox').classList.add('hidden');
+    document.getElementById('dashboard').classList.remove('hidden');
+    const origin = window.location.protocol + '//' + window.location.host;
+    document.getElementById('addVpsCommand').textContent =
+      'sudo bash setup.sh --role node \\\n' +
+      '  --api-url ' + origin + ' \\\n' +
+      '  --admin-key ' + adminKey + ' \\\n' +
+      '  --country "United Kingdom" --country-code GB --city London';
+    startPolling();
+  }
+
+  // 20s background poll -- but mobile browsers throttle or fully suspend
+  // setInterval once a tab is backgrounded (app-switched, screen off), so a
+  // pure timer alone can leave the dashboard frozen on stale data for a long
+  // time after you return to it. The visibilitychange listener below forces
+  // an immediate refresh the moment the tab becomes visible again, so
+  // returning to the tab always shows current data instead of waiting for
+  // the next tick (this was the "doesn't refresh" glitch).
+  function startPolling() {
+    stopPolling();
+    refresh();
+    refreshTimer = setInterval(refresh, 20000);
+  }
+  function stopPolling() {
+    if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && adminKey) refresh();
+  });
+
+  window.logout = function () {
+    stopPolling();
+    localStorage.removeItem('fastvpn_admin_key');
+    adminKey = '';
+    document.getElementById('dashboard').classList.add('hidden');
+    document.getElementById('loginBox').classList.remove('hidden');
+    document.getElementById('loginError').textContent = '';
+  };
+
+  async function refresh() {
+    try {
+      const resp = await fetch('/api/admin/dashboard', {
+        headers: await authHeaders()
+      });
+      if (resp.status === 401) {
+        stopPolling(); // no point polling a session that's no longer valid
+        localStorage.removeItem('fastvpn_admin_key');
+        adminKey = '';
+        document.getElementById('loginError').textContent = 'Sign-in expired or invalid -- please sign in again.';
+        document.getElementById('dashboard').classList.add('hidden');
+        document.getElementById('loginBox').classList.remove('hidden');
+        return;
+      }
+      if (!resp.ok) {
+        // e.g. 429 (rate limited -- several tabs open) or a server-side error.
+        // This used to fall through to renderDashboard() with an error body
+        // shaped nothing like {servers, totalServers, ...}; that threw and
+        // was silently swallowed by the catch below, leaving the stats stuck
+        // on the page's original "-" placeholders with no visible reason why.
+        let detail = '';
+        try { detail = (await resp.json()).error || ''; } catch (_) { /* body wasn't JSON */ }
+        document.getElementById('lastUpdated').textContent =
+          'Could not refresh (HTTP ' + resp.status + (detail ? ': ' + detail : '') + ') -- will retry.';
+        return;
+      }
+      const data = await resp.json();
+      lastData = data;
+      renderDashboard(data);
+    } catch (e) {
+      document.getElementById('lastUpdated').textContent = 'Could not reach the API just now -- will retry.';
+    }
+  }
+  window.refresh = refresh;
+
+  function renderDashboard(data) {
+    document.getElementById('statServers').textContent = data.totalServers;
+    document.getElementById('statDevices').textContent = data.totalRegisteredDevices;
+    document.getElementById('statConnected').textContent = data.totalConnectedDevices ?? '-';
+
+    const list = document.getElementById('serverList');
+    const emptyMsg = document.getElementById('emptyMsg');
+    list.innerHTML = '';
+
+    const query = (document.getElementById('searchBox').value || '').trim().toLowerCase();
+    const servers = query
+      ? data.servers.filter((s) =>
+          (s.name + ' ' + s.countryName + ' ' + s.city).toLowerCase().includes(query))
+      : data.servers;
+
+    if (data.servers.length === 0) {
+      emptyMsg.classList.remove('hidden');
+      emptyMsg.textContent = 'No VPS registered yet. Run setup.sh --role node on one to see it here.';
+    } else if (servers.length === 0) {
+      emptyMsg.classList.remove('hidden');
+      emptyMsg.textContent = 'No servers match "' + query + '".';
+    } else {
+      emptyMsg.classList.add('hidden');
+      servers.forEach((s) => {
+        const row = document.createElement('div');
+        row.className = 'server-row';
+        // activePeerCount comes from the agent's WireGuard handshake check --
+        // -1 means an older agent that doesn't report it, so fall back to a dash.
+        const connectedLabel = s.healthy && s.activePeerCount >= 0 ? s.activePeerCount : '-';
+        const max = s.maxRegistrations || 200;
+        const pct = Math.min(100, Math.round((s.registeredDevices / max) * 100));
+        const editId = 'edit-' + s.id;
+        row.innerHTML =
+          '<div class="dot ' + (s.healthy ? 'up' : 'down') + '"></div>' +
+          '<div class="server-info">' +
+            '<div class="server-name">' + flagFor(s.countryCode) + ' ' + escapeHtml(s.name) + '</div>' +
+            '<div class="server-detail">' + escapeHtml(s.countryName) + (s.city ? ' • ' + escapeHtml(s.city) : '') + ' • ' + escapeHtml(s.endpointHost) + ' • checked ' + timeAgo(s.lastCheckedAt) + '</div>' +
+          '</div>' +
+          '<div class="server-count">' +
+            '<div class="row"><span class="n connected">' + connectedLabel + '</span> <span style="color:#8a8a8a;">connected</span></div>' +
+            '<div class="row"><span class="n">' + s.registeredDevices + '</span>/' + max + ' <span style="color:#8a8a8a;">slots</span></div>' +
+          '</div>' +
+          '<div class="capacity-bar"><div class="capacity-fill ' + (pct >= 90 ? 'full' : '') + '" style="width:' + pct + '%"></div></div>' +
+          '<div class="server-actions">' +
+            '<button onclick="recheckServer(\'' + s.id + '\')">Recheck</button>' +
+            '<button onclick="toggleEdit(\'' + editId + '\')">Edit</button>' +
+            '<button class="danger" onclick="removeServer(\'' + s.id + '\', ' + JSON.stringify(s.name) + ')">Remove</button>' +
+          '</div>' +
+          '<div class="edit-row" id="' + editId + '">' +
+            '<input id="' + editId + '-name" placeholder="Name" value="' + escapeHtml(s.name) + '">' +
+            '<input id="' + editId + '-country" placeholder="Country" value="' + escapeHtml(s.countryName) + '">' +
+            '<input id="' + editId + '-city" placeholder="City" value="' + escapeHtml(s.city || '') + '">' +
+            '<button onclick="saveEdit(\'' + s.id + '\', \'' + editId + '\')">Save</button>' +
+          '</div>';
+        list.appendChild(row);
+      });
+    }
+
+    document.getElementById('lastUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+  }
+
+  window.toggleEdit = function (editId) {
+    document.getElementById(editId).classList.toggle('open');
+  };
+
+  window.recheckServer = async function (id) {
+    try {
+      await fetch('/api/admin/recheck-server', {
+        method: 'POST',
+        headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      refresh();
+    } catch (e) { /* next scheduled refresh will pick it up */ }
+  };
+
+  window.removeServer = async function (id, name) {
+    if (!confirm('Remove ' + name + ' from the server list? Devices already connected to it are unaffected.')) return;
+    try {
+      const resp = await fetch('/api/admin/remove-server', {
+        method: 'POST',
+        headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      if (resp.ok) refresh();
+    } catch (e) { document.getElementById('lastUpdated').textContent = 'Could not remove server -- try again.'; }
+  };
+
+  window.saveEdit = async function (id, editId) {
+    const name = document.getElementById(editId + '-name').value.trim();
+    const countryName = document.getElementById(editId + '-country').value.trim();
+    const city = document.getElementById(editId + '-city').value.trim();
+    try {
+      const resp = await fetch('/api/admin/update-server', {
+        method: 'POST',
+        headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, name, countryName, city }),
+      });
+      if (resp.ok) refresh();
+    } catch (e) { document.getElementById('lastUpdated').textContent = 'Could not save changes -- try again.'; }
+  };
+
+  window.copyAddVpsCommand = async function () {
+    const text = document.getElementById('addVpsCommand').textContent;
+    const btn = document.getElementById('copyVpsCmdBtn');
+    try {
+      await navigator.clipboard.writeText(text);
+      btn.textContent = 'Copied!';
+    } catch (e) {
+      btn.textContent = 'Could not copy -- select manually';
+    }
+    setTimeout(() => { btn.textContent = 'Copy command'; }, 2000);
+  };
+
+  window.manualAddServer = async function () {
+    const errEl = document.getElementById('manualAddError');
+    errEl.textContent = '';
+    const body = {
+      endpointHost: document.getElementById('ms-host').value.trim(),
+      endpointPort: document.getElementById('ms-port').value.trim(),
+      serverPublicKey: document.getElementById('ms-pubkey').value.trim(),
+      agentUrl: document.getElementById('ms-agenturl').value.trim(),
+      agentApiKey: document.getElementById('ms-agentkey').value.trim(),
+      countryName: document.getElementById('ms-country').value.trim(),
+      countryCode: document.getElementById('ms-cc').value.trim(),
+      city: document.getElementById('ms-city').value.trim(),
+    };
+    if (!body.endpointHost || !body.serverPublicKey || !body.agentUrl || !body.agentApiKey) {
+      errEl.textContent = 'Host, server public key, agent URL, and agent API key are required.';
+      return;
+    }
+    try {
+      const resp = await fetch('/api/admin/add-server', {
+        method: 'POST',
+        headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        errEl.textContent = data.error || 'Could not add server.';
+        return;
+      }
+      ['ms-host','ms-port','ms-pubkey','ms-agenturl','ms-agentkey','ms-country','ms-cc','ms-city'].forEach((id) => {
+        if (id !== 'ms-port') document.getElementById(id).value = '';
+      });
+      refresh();
+    } catch (e) {
+      errEl.textContent = 'Could not reach the API -- try again.';
+    }
+  };
+
+  function timeAgo(ms) {
+    if (!ms) return 'just now';
+    const secs = Math.max(0, Math.round((Date.now() - ms) / 1000));
+    if (secs < 5) return 'just now';
+    if (secs < 60) return secs + 's ago';
+    return Math.round(secs / 60) + 'm ago';
+  }
+
+  function flagFor(countryCode) {
+    if (!countryCode || countryCode.length !== 2) return '🌐';
+    const base = 0x1F1E6;
+    const cc = countryCode.toUpperCase();
+    return String.fromCodePoint(cc.charCodeAt(0) - 65 + base, cc.charCodeAt(1) - 65 + base);
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+</script>
+
+</body>
+</html>

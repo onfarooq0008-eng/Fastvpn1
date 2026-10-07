@@ -1,0 +1,137 @@
+name: Build FastVPN APK
+
+# Runs automatically every time you push code to GitHub.
+# No PC/Android Studio needed -- GitHub's cloud servers do the build.
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch: {}   # lets you also click "Run workflow" manually in the Actions tab
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # secrets can't be referenced directly inside `if:` conditions, so we
+      # stash a plain true/false here first and check that instead below.
+      HAS_RELEASE_KEYSTORE: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Android SDK
+        run: |
+          # We used to call android-actions/setup-android@v3 here, but that
+          # action unconditionally runs `sdkmanager tools` as part of its own
+          # internal license/version check -- a legacy package Google no
+          # longer serves, so it hard-fails (exit code 1) before our build
+          # even starts. Overriding the action's `packages` input doesn't
+          # help, since that internal call isn't driven by that input at all.
+          #
+          # ubuntu-latest runners already ship a pre-installed, pre-licensed
+          # Android SDK at $ANDROID_HOME, and AGP auto-downloads anything
+          # else it needs (platform 36, matching build-tools) during the
+          # Gradle build below. We just make sure all licenses are accepted
+          # up front -- a plain `sdkmanager --licenses` call, which is a
+          # different operation from the broken `sdkmanager tools` above and
+          # doesn't touch the removed package.
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -maxdepth 2 -name sdkmanager | sort -V | tail -1)"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          # Pinned to a version known to work with AGP 9.0.1 + Kotlin 2.4.0 below.
+          # Without this, the action grabs the newest Gradle release, which can be
+          # ahead of what our Android/Kotlin plugin versions support and breaks
+          # the build in confusing ways (e.g. "unresolved reference: let").
+          gradle-version: '9.1.0'
+
+      - name: Run unit tests
+        run: gradle testDebugUnitTest
+
+      - name: Upload test results (only runs if tests failed, for debugging)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: app/build/reports/tests/testDebugUnitTest/
+
+      - name: Build debug APK
+        run: gradle assembleDebug
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: FastVPN-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      # Release build: only runs if the RELEASE_KEYSTORE_BASE64 secret is set
+      # (Settings -> Secrets and variables -> Actions -> New repository secret).
+      # Skips cleanly on forks/PRs where secrets aren't available.
+      - name: Decode release keystore
+        if: ${{ env.HAS_RELEASE_KEYSTORE == 'true' }}
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > fastvpn-release.keystore
+
+      - name: Write keystore.properties
+        if: ${{ env.HAS_RELEASE_KEYSTORE == 'true' }}
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          cat > keystore.properties << EOF
+          storeFile=fastvpn-release.keystore
+          storePassword=${RELEASE_STORE_PASSWORD}
+          keyAlias=${RELEASE_KEY_ALIAS}
+          keyPassword=${RELEASE_KEY_PASSWORD}
+          EOF
+
+      - name: Build signed release APK
+        if: ${{ env.HAS_RELEASE_KEYSTORE == 'true' }}
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: gradle assembleRelease
+
+      - name: Upload signed release APK
+        if: ${{ env.HAS_RELEASE_KEYSTORE == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: FastVPN-release-apk-signed
+          path: app/build/outputs/apk/release/app-release.apk
+
+      # Play Store requires an .aab (Android App Bundle), not an .apk, for
+      # new app uploads. Same keystore/config as the APK above, just a
+      # different Gradle task and output path.
+      - name: Build signed release AAB (for Play Store upload)
+        if: ${{ env.HAS_RELEASE_KEYSTORE == 'true' }}
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: gradle bundleRelease
+
+      - name: Upload signed release AAB
+        if: ${{ env.HAS_RELEASE_KEYSTORE == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: FastVPN-release-aab-signed
+          path: app/build/outputs/bundle/release/app-release.aab
+
+      # AGP writes this zip because of `ndk { debugSymbolLevel 'FULL' }` in
+      # app/build.gradle. It's already embedded inside the AAB above, so Play
+      # Console picks it up automatically -- this upload is just a convenience
+      # copy for local crash/ANR debugging.
+      - name: Upload native debug symbols
+        if: ${{ env.HAS_RELEASE_KEYSTORE == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: FastVPN-release-native-debug-symbols
+          path: app/build/outputs/native-debug-symbols/release/native-debug-symbols.zip
+          if-no-files-found: ignore
