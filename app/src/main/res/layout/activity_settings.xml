@@ -91,14 +91,6 @@
                 <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginStart="68dp" android:background="@color/divider" />
                 <include android:id="@+id/rowAbout" layout="@layout/view_setting_row" android:layout_width="match_parent" android:layout_height="wrap_content" />
             </LinearLayout>
-
-            <!-- Native banner ad: hidden until an ad has loaded; the ad carries its own "Sponsored"/AdChoices label -->
-            <FrameLayout
-                android:id="@+id/nativeBannerContainer"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="20dp"
-                android:visibility="gone" />
         </LinearLayout>
     </ScrollView>
 

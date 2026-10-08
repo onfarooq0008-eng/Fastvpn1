@@ -10,6 +10,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.Toast
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
 import java.lang.ref.WeakReference
 
 /**
@@ -37,6 +39,10 @@ object AdsManager {
                 AdNetwork.UNITY -> UnityAdsProvider()
             }
         }
+    }
+
+    private val bannerProviders: List<AdProvider> by lazy {
+        AdConfig.BANNER_ORDER.mapNotNull { n -> providers.firstOrNull { it.network == n } }
     }
 
     private var appContext: Application? = null
@@ -152,8 +158,8 @@ object AdsManager {
         val activity = req.activity.get()
         val container = req.container.get()
         if (activity == null || container == null || activity.isFinishing || activity.isDestroyed) return
-        for (i in startIndex until providers.size) {
-            val p = providers[i]
+        for (i in startIndex until bannerProviders.size) {
+            val p = bannerProviders[i]
             if (p.initState == InitState.INITIALIZING || p.initState == InitState.NOT_STARTED) {
                 if (started) return // wait: retried from onProviderInitialized
                 continue
@@ -270,7 +276,40 @@ object AdsManager {
     fun showInterstitial(activity: Activity, onComplete: () -> Unit) = showInterstitialInternal(activity, "interstitial", false, onComplete)
 
     /** Same, for the CONNECT tap: allowed right after launch and with AdConfig.CONNECT_AD_MIN_INTERVAL_MS. */
-    fun showConnectInterstitial(activity: Activity, onComplete: () -> Unit) = showInterstitialInternal(activity, "connect-interstitial", true, onComplete)
+    fun showConnectInterstitial(activity: Activity, onComplete: () -> Unit) {
+        disconnectAdToken++ // a pending "after disconnect" ad must not appear over a new connection
+        showInterstitialInternal(activity, "connect-interstitial", true, onComplete)
+    }
+
+    private var disconnectAdToken = 0
+
+    /**
+     * Call right AFTER the VPN has been disconnected by the user. Shows an interstitial; if none is loaded yet it
+     * is loaded now and shown the moment it is ready (waits at most AdConfig.DISCONNECT_AD_WAIT_MS, polling every
+     * 400 ms, then gives up -- no retry loop). Only shown while the screen is in the foreground.
+     */
+    fun showDisconnectInterstitial(activity: Activity) {
+        if (!adsEnabled) return
+        val token = ++disconnectAdToken
+        if (!isInterstitialReady()) preloadInterstitial()
+        pollDisconnectAd(WeakReference(activity), token, SystemClock.elapsedRealtime() + AdConfig.DISCONNECT_AD_WAIT_MS)
+    }
+
+    private fun pollDisconnectAd(ref: WeakReference<Activity>, token: Int, deadline: Long) {
+        if (token != disconnectAdToken) return
+        val activity = ref.get() ?: return
+        if (activity.isFinishing || activity.isDestroyed) return
+        if (activity is LifecycleOwner && !activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
+        if (isInterstitialReady()) {
+            showInterstitialInternal(activity, "disconnect-interstitial", true) {}
+            return
+        }
+        if (SystemClock.elapsedRealtime() >= deadline) {
+            AdLog.d("disconnect interstitial not ready in time -- skipped")
+            return
+        }
+        main.postDelayed({ pollDisconnectAd(ref, token, deadline) }, 400L)
+    }
 
     internal fun showAppOpen(activity: Activity) = showInterstitialInternal(activity, "app-open", false, {})
 

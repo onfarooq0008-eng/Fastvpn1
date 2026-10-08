@@ -56,6 +56,9 @@ object AdConfig {
     /** Which network is tried first / second. Direct fallback, not formal mediation -- see UPGRADE_NOTES.md. */
     internal val PROVIDER_ORDER = listOf(AdNetwork.META, AdNetwork.UNITY)
 
+    /** Banner: Unity first (normal banner), Meta as fallback. Interstitials keep PROVIDER_ORDER. */
+    internal val BANNER_ORDER = listOf(AdNetwork.UNITY, AdNetwork.META)
+
     /** true => test ads only. */
     val isTestMode: Boolean get() = BuildConfig.DEBUG || BuildConfig.USE_TEST_ADS
 
@@ -72,6 +75,12 @@ object AdConfig {
      * It is allowed right after launch and uses this shorter gap. 0 = show it on every Connect tap if an ad is loaded.
      */
     const val CONNECT_AD_MIN_INTERVAL_MS = 0L
+
+    /**
+     * After the user DISCONNECTS the VPN, an interstitial is shown. If none is loaded yet it is loaded now and
+     * shown as soon as it is ready, waiting at most this long (the VPN is already off, nothing is blocked).
+     */
+    const val DISCONNECT_AD_WAIT_MS = 6_000L
 
     /** Hard cap per app session (= process lifetime). */
     const val MAX_INTERSTITIALS_PER_SESSION = 12

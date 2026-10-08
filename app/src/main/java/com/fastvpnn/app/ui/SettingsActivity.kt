@@ -17,7 +17,6 @@ import com.fastvpnn.app.data.AppSettings
 import com.fastvpnn.app.databinding.ActivitySettingsBinding
 import com.fastvpnn.app.databinding.ViewSettingRowBinding
 import com.fastvpnn.app.ads.AdsConsent
-import com.fastvpnn.app.ads.AdsManager
 import com.fastvpnn.app.util.ThemeUtil
 import com.fastvpnn.app.util.applyEdgeToEdgeInsets
 
@@ -40,12 +39,6 @@ class SettingsActivity : AppCompatActivity() {
         setUpBottomNav()
         setUpGeneral()
         setUpOther()
-        AdsManager.showNativeBanner(this, binding.nativeBannerContainer)
-    }
-
-    override fun onDestroy() {
-        AdsManager.hideNativeBanner(binding.nativeBannerContainer)
-        super.onDestroy()
     }
 
     override fun onResume() {

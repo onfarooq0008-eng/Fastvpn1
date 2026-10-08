@@ -101,3 +101,10 @@ adapters; `AdProvider` is the seam where such a provider would plug in.
   Meta code is in `MetaAdsProvider.kt`.
 - Neither network has an App Open format: the app-open ad is an interstitial shown on return from background.
 - Native ads are Meta only.
+
+## Round 5 -- ad placement update
+- Connect (VPN off): preloaded interstitial shows first, then the VPN connects (never waits for an ad).
+- Disconnect (user taps disconnect, VPN now off): an interstitial is loaded if needed and shown as soon as ready
+  (waits up to AdConfig.DISCONNECT_AD_WAIT_MS = 6 s, only while the app is in the foreground). No ad when switching servers.
+- Home page: Meta native banner directly below the "Current Location" server card; normal bottom banner now tries
+  Unity first (AdConfig.BANNER_ORDER), Meta as fallback. Settings no longer has a native banner.

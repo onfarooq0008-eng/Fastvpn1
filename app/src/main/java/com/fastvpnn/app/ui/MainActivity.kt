@@ -148,6 +148,7 @@ class MainActivity : AppCompatActivity() {
 
         requestNotificationPermissionIfNeeded()
         AdsManager.showBanner(this, binding.adContainer)
+        AdsManager.showNativeBanner(this, binding.nativeBannerHome)
         // First launch: ask for the ad-privacy choice once; ads only start after it.
         if (savedInstanceState == null && AdsConsent.needsPrompt(this)) {
             AdsConsent.showDialog(this)
@@ -263,6 +264,7 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         adapter.destroyAds()
         AdsManager.hideBanner(binding.adContainer)
+        AdsManager.hideNativeBanner(binding.nativeBannerHome)
     }
 
     override fun onPause() {
@@ -509,6 +511,8 @@ class MainActivity : AppCompatActivity() {
                 result.onSuccess {
                     releaseActiveRegistrationLease()
                     onDisconnected()
+                    // VPN is now off: load + show an interstitial.
+                    AdsManager.showDisconnectInterstitial(this@MainActivity)
                 }.onFailure {
                     android.widget.Toast.makeText(
                         this@MainActivity,
@@ -568,6 +572,7 @@ class MainActivity : AppCompatActivity() {
                     if (result.isSuccess) {
                         releaseActiveRegistrationLease()
                         onDisconnected()
+                        AdsManager.showDisconnectInterstitial(this@MainActivity)
                     } else {
                         tunnelManager.syncStateFromBackend()
                         updateStatusCard()
@@ -649,6 +654,35 @@ class MainActivity : AppCompatActivity() {
             ).show()
             doConnect(chain, attemptIndex)
         }
+    }
+
+    /** Everything doConnect() needs out of a successful registration call, bundled as
+     *  one immutable value instead of four separate nullable `var`s -- so the rest of
+     *  the function can use these fields directly with no null checks or `!!`. */
+    private data class Registration(
+        val server: Server,
+        val assignedAddressCidr: String,
+        val serverId: String,
+        val token: String
+    )
+
+    private suspend fun registerWithServer(server: Server): Registration {
+        val publicKey = keyStore.clientPublicKeyBase64()
+        val reg = serverSource.register(publicKey, preferredServerId = server.id)
+        if (reg.registrationToken.isNotBlank()) {
+            keyStore.addPendingRegistration(reg.serverId, reg.registrationToken)
+        }
+        return Registration(
+            server = server.copy(
+                endpointHost = reg.endpointHost,
+                endpointPort = reg.endpointPort,
+                serverPublicKey = reg.serverPublicKey,
+                dns = reg.dns
+            ),
+            assignedAddressCidr = "${reg.assignedAddress}/32",
+            serverId = reg.serverId,
+            token = reg.registrationToken
+        )
     }
 
     private fun doConnect(chain: List<Server>, attemptIndex: Int) {
