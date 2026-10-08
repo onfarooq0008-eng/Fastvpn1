@@ -7,19 +7,17 @@ import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import com.unity3d.ads.BannerAd
-import com.unity3d.ads.BannerLoadConfiguration
-import com.unity3d.ads.BannerLoadListener
+import com.unity3d.ads.BannerConfiguration
 import com.unity3d.ads.BannerShowListener
 import com.unity3d.ads.BannerSize
 import com.unity3d.ads.InitializationConfiguration
 import com.unity3d.ads.InitializationListener
 import com.unity3d.ads.InterstitialAd as UnityInterstitial
-import com.unity3d.ads.InterstitialLoadListener
 import com.unity3d.ads.InterstitialShowListener
 import com.unity3d.ads.LoadConfiguration
+import com.unity3d.ads.LoadListener
 import com.unity3d.ads.LogLevel
 import com.unity3d.ads.RewardedAd as UnityRewarded
-import com.unity3d.ads.RewardedLoadListener
 import com.unity3d.ads.RewardedShowListener
 import com.unity3d.ads.ShowConfiguration
 import com.unity3d.ads.ShowFinishState
@@ -103,30 +101,31 @@ internal class UnityAdsProvider : AdProvider {
         destroyBanner()
         try {
             AdLog.d("Unity banner loading")
-            val config = BannerLoadConfiguration.Builder(id, BannerSize(320, 50))
-                .withListener(object : BannerShowListener {
-                    override fun onBannerShown(bannerAd: BannerAd) {}
-                    override fun onBannerClicked(bannerAd: BannerAd) {}
-                    override fun onBannerFailedToShow(bannerAd: BannerAd, error: UnityAdsError) {
-                        AdLog.d("Unity banner failed to show")
+            val showListener = object : BannerShowListener {
+                override fun onImpression(banner: BannerAd) {}
+                override fun onClicked(banner: BannerAd) {}
+                override fun onFailedToShow(banner: BannerAd, error: UnityAdsError) {
+                    AdLog.d("Unity banner failed to show")
+                }
+            }
+            val config = BannerConfiguration.Builder(id, BannerSize(320, 50), showListener).build()
+            BannerAd.load(config, object : LoadListener<BannerAd> {
+                override fun onAdLoaded(ad: BannerAd?, error: UnityAdsError?) {
+                    val view = ad?.view
+                    if (ad == null || view == null || error != null || activity.isFinishing || activity.isDestroyed) {
+                        AdLog.d("Unity banner failed: ${error?.code}")
+                        onResult(false)
+                    } else {
+                        banner = ad
+                        bannerContainer = container
+                        container.removeAllViews()
+                        container.addView(
+                            view,
+                            FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL)
+                        )
+                        AdLog.d("Unity banner loaded")
+                        onResult(true)
                     }
-                })
-                .build()
-            BannerAd.load(config, BannerLoadListener { bannerAd, error ->
-                val view = bannerAd?.view
-                if (bannerAd == null || view == null || activity.isFinishing || activity.isDestroyed) {
-                    AdLog.d("Unity banner failed: ${error?.code}")
-                    onResult(false)
-                } else {
-                    banner = bannerAd
-                    bannerContainer = container
-                    container.removeAllViews()
-                    container.addView(
-                        view,
-                        FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL)
-                    )
-                    AdLog.d("Unity banner loaded")
-                    onResult(true)
                 }
             })
         } catch (t: Throwable) {
@@ -150,15 +149,17 @@ internal class UnityAdsProvider : AdProvider {
         if (isInterstitialReady() || !interstitialGate.tryStart()) return
         try {
             AdLog.d("Unity interstitial loading")
-            UnityInterstitial.load(LoadConfiguration.Builder(id).build(), InterstitialLoadListener { ad, error ->
-                if (ad != null) {
-                    interstitial = ad
-                    interstitialGate.success()
-                    AdLog.d("Unity interstitial loaded")
-                } else {
-                    interstitial = null
-                    interstitialGate.failure()
-                    AdLog.d("Unity interstitial failed: ${error?.code}")
+            UnityInterstitial.load(LoadConfiguration.Builder(id).build(), object : LoadListener<UnityInterstitial> {
+                override fun onAdLoaded(ad: UnityInterstitial?, error: UnityAdsError?) {
+                    if (ad != null && error == null) {
+                        interstitial = ad
+                        interstitialGate.success()
+                        AdLog.d("Unity interstitial loaded")
+                    } else {
+                        interstitial = null
+                        interstitialGate.failure()
+                        AdLog.d("Unity interstitial failed: ${error?.code}")
+                    }
                 }
             })
         } catch (t: Throwable) {
@@ -174,7 +175,7 @@ internal class UnityAdsProvider : AdProvider {
         if (ad == null) { callbacks.onFailed(); return }
         interstitial = null // a Unity ad can be shown once
         try {
-            ad.show(ShowConfiguration.Builder().build(), object : InterstitialShowListener {
+            ad.show(activity, ShowConfiguration.Builder().build(), object : InterstitialShowListener {
                 override fun onStarted(unityAd: UnityInterstitial) { callbacks.onDisplayed() }
                 override fun onClicked(unityAd: UnityInterstitial) {}
                 override fun onCompleted(unityAd: UnityInterstitial, state: ShowFinishState) { callbacks.onClosed() }
@@ -195,15 +196,17 @@ internal class UnityAdsProvider : AdProvider {
         if (isRewardedReady() || !rewardedGate.tryStart()) return
         try {
             AdLog.d("Unity rewarded loading")
-            UnityRewarded.load(LoadConfiguration.Builder(id).build(), RewardedLoadListener { ad, error ->
-                if (ad != null) {
-                    rewarded = ad
-                    rewardedGate.success()
-                    AdLog.d("Unity rewarded loaded")
-                } else {
-                    rewarded = null
-                    rewardedGate.failure()
-                    AdLog.d("Unity rewarded failed: ${error?.code}")
+            UnityRewarded.load(LoadConfiguration.Builder(id).build(), object : LoadListener<UnityRewarded> {
+                override fun onAdLoaded(ad: UnityRewarded?, error: UnityAdsError?) {
+                    if (ad != null && error == null) {
+                        rewarded = ad
+                        rewardedGate.success()
+                        AdLog.d("Unity rewarded loaded")
+                    } else {
+                        rewarded = null
+                        rewardedGate.failure()
+                        AdLog.d("Unity rewarded failed: ${error?.code}")
+                    }
                 }
             })
         } catch (t: Throwable) {
@@ -219,7 +222,7 @@ internal class UnityAdsProvider : AdProvider {
         if (ad == null) { callbacks.onFailed(); return }
         rewarded = null
         try {
-            ad.show(ShowConfiguration.Builder().build(), object : RewardedShowListener {
+            ad.show(activity, ShowConfiguration.Builder().build(), object : RewardedShowListener {
                 override fun onStarted(unityAd: UnityRewarded) { callbacks.onDisplayed() }
                 override fun onClicked(unityAd: UnityRewarded) {}
                 // The reward is granted ONLY here, when Unity confirms the user earned it.
