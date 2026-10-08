@@ -18,7 +18,8 @@ import java.util.Locale
  *    request/serve personalised Meta ads without it.
  *  - Unity Ads: UnityAds.userConsent / userOptOut / nonBehavioral.
  *
- * Flow: one first-party dialog (asked once, re-openable from Settings > Ad privacy choices):
+ * Flow: outside the EEA/UK/CH personalised ads are on by default with a switch in Settings > Personalised ads;
+ * inside them a first-party dialog is asked once (changeable with the same switch):
  *   Allow     -> personalised ads
  *   Don't allow -> non-personalised ads (Meta LDU + Unity non-behavioural);
  *                  in the EEA/UK/Switzerland (or when the country can't be determined) NO ad SDK is started at all.
@@ -47,10 +48,22 @@ object AdsConsent {
         return country == null || country in CONSENT_REGIONS
     }
 
+    /**
+     * Outside the EEA/UK/Switzerland, personalised ads are ON by default (no dialog) and the user can switch them
+     * off in Settings. Inside those regions (or when the country can't be detected) consent is legally required first,
+     * so the choice dialog is still shown and nothing runs until the user has answered.
+     */
     fun decision(context: Context): Decision = when (AppSettings(context).adConsent) {
         "personalized" -> Decision.PERSONALIZED
         "declined" -> if (requiresConsentRegion(context)) Decision.DISABLED else Decision.LIMITED
-        else -> Decision.UNSET
+        else -> if (requiresConsentRegion(context)) Decision.UNSET else Decision.PERSONALIZED
+    }
+
+    /** Settings switch. true = personalised ads allowed. */
+    fun setPersonalized(activity: Activity, allowed: Boolean) {
+        AppSettings(activity).adConsent = if (allowed) "personalized" else "declined"
+        AdsManager.onConsentChanged(activity.application)
+        AdsManager.init(activity.application)
     }
 
     fun needsPrompt(context: Context) = decision(context) == Decision.UNSET
@@ -92,9 +105,9 @@ object AdsConsent {
 
     /** Short label for the Settings row. */
     fun summary(context: Context): String = when (decision(context)) {
-        Decision.PERSONALIZED -> "Personalised ads"
-        Decision.LIMITED -> "Non-personalised ads"
-        Decision.DISABLED -> "Ads off (no consent)"
+        Decision.PERSONALIZED -> "On: ads can use your advertising ID to be more relevant"
+        Decision.LIMITED -> "Off: you only see non-personalised ads"
+        Decision.DISABLED -> "Off: ads are not requested in your region"
         Decision.UNSET -> "Not chosen yet"
     }
 }

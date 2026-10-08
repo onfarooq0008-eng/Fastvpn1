@@ -209,27 +209,11 @@
                         android:textSize="13sp" />
                 </LinearLayout>
 
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/buttonFastest"
-                    android:layout_width="match_parent"
-                    android:layout_height="54dp"
-                    android:layout_marginTop="20dp"
-                    android:text="Fastest Server • Auto Connect"
-                    android:textAllCaps="false"
-                    android:textColor="@color/white"
-                    android:textSize="15sp"
-                    android:textStyle="bold"
-                    app:backgroundTint="@color/primary"
-                    app:cornerRadius="16dp"
-                    app:icon="@drawable/ic_bolt"
-                    app:iconGravity="textStart"
-                    app:iconTint="@color/white" />
-
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardCurrentLocation"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
+                    android:layout_marginTop="24dp"
                     android:clickable="true"
                     android:focusable="true"
                     app:cardBackgroundColor="@color/cardBackground"
@@ -482,22 +466,6 @@
                 android:textColor="@color/textPrimary"
                 android:textColorHint="@color/gray"
                 android:textSize="14sp" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/buttonFastestLocations"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginHorizontal="16dp"
-                android:layout_marginTop="10dp"
-                android:text="Fastest Server • Auto Connect"
-                android:textAllCaps="false"
-                android:textColor="@color/white"
-                android:textStyle="bold"
-                app:backgroundTint="@color/primary"
-                app:cornerRadius="14dp"
-                app:icon="@drawable/ic_bolt"
-                app:iconGravity="textStart"
-                app:iconTint="@color/white" />
 
             <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
                 android:id="@+id/swipeRefresh"

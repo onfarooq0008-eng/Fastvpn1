@@ -11,22 +11,26 @@ import com.fastvpnn.app.ads.AdsManager
 import com.fastvpnn.app.ads.NativeAdHandle
 import com.fastvpnn.app.data.Server
 import com.fastvpnn.app.databinding.ItemCountryBinding
+import com.fastvpnn.app.databinding.ItemFastestBinding
 import com.fastvpnn.app.databinding.ItemNativeAdBinding
 import com.fastvpnn.app.databinding.ItemServerBinding
 
 private const val VIEW_TYPE_HEADER = 0
 private const val VIEW_TYPE_SERVER = 1
 private const val VIEW_TYPE_NATIVE_AD = 2
+private const val VIEW_TYPE_FASTEST = 3
 
 class HomeListAdapter(
     private val onHeaderClick: (CountryGroup) -> Unit,
     private val onServerClick: (Server) -> Unit,
-    private val onFavoriteClick: (CountryGroup) -> Unit
+    private val onFavoriteClick: (CountryGroup) -> Unit,
+    private val onFastestClick: () -> Unit
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     private val items = mutableListOf<HomeRow>()
     private var connectedServerId: String? = null
     private var favorites: Set<String> = emptySet()
+    private var fastestSelected = false
 
     // Cache loaded native ads per slot so scrolling/refreshing the list doesn't burn
     // a fresh ad request every time; cleared ads are destroyed to avoid leaking webviews.
@@ -34,11 +38,12 @@ class HomeListAdapter(
     private val loadingSlots = mutableSetOf<Int>()
     private val failedSlots = mutableSetOf<Int>()
 
-    fun submit(newItems: List<HomeRow>, connectedServerId: String?, favorites: Set<String>) {
+    fun submit(newItems: List<HomeRow>, connectedServerId: String?, favorites: Set<String>, fastestSelected: Boolean = false) {
         val oldItems = items.toList()
         val connectedIdChanged = this.connectedServerId != connectedServerId
         this.connectedServerId = connectedServerId
         this.favorites = favorites
+        this.fastestSelected = fastestSelected
         val diff = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
             override fun getOldListSize() = oldItems.size
             override fun getNewListSize() = newItems.size
@@ -66,6 +71,7 @@ class HomeListAdapter(
         is HomeRow.Header -> "header_${row.group.countryCode}"
         is HomeRow.ServerRow -> "server_${row.server.id}"
         is HomeRow.NativeAdRow -> "ad_${row.slotId}"
+        is HomeRow.FastestRow -> "fastest"
     }
 
     /** Call from the host Activity's onDestroy to release native ad resources. */
@@ -80,11 +86,13 @@ class HomeListAdapter(
         is HomeRow.Header -> VIEW_TYPE_HEADER
         is HomeRow.ServerRow -> VIEW_TYPE_SERVER
         is HomeRow.NativeAdRow -> VIEW_TYPE_NATIVE_AD
+        is HomeRow.FastestRow -> VIEW_TYPE_FASTEST
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
         return when (viewType) {
             VIEW_TYPE_HEADER -> HeaderVH(ItemCountryBinding.inflate(LayoutInflater.from(parent.context), parent, false))
+            VIEW_TYPE_FASTEST -> FastestVH(ItemFastestBinding.inflate(LayoutInflater.from(parent.context), parent, false))
             VIEW_TYPE_NATIVE_AD -> NativeAdVH(ItemNativeAdBinding.inflate(LayoutInflater.from(parent.context), parent, false))
             else -> ServerVH(ItemServerBinding.inflate(LayoutInflater.from(parent.context), parent, false))
         }
@@ -95,6 +103,7 @@ class HomeListAdapter(
             is HomeRow.Header -> (holder as HeaderVH).bind(row)
             is HomeRow.ServerRow -> (holder as ServerVH).bind(row.server)
             is HomeRow.NativeAdRow -> (holder as NativeAdVH).bind(row.slotId)
+            is HomeRow.FastestRow -> (holder as FastestVH).bind()
         }
     }
 
@@ -104,6 +113,19 @@ class HomeListAdapter(
         val ctx = card.context
         card.setCardBackgroundColor(ContextCompat.getColor(ctx, if (connected) R.color.connectedTint else normalBg))
         card.strokeColor = ContextCompat.getColor(ctx, if (connected) R.color.statusOnline else R.color.divider)
+    }
+
+    inner class FastestVH(val b: ItemFastestBinding) : RecyclerView.ViewHolder(b.root) {
+        fun bind() {
+            val ctx = b.root.context
+            val selected = fastestSelected
+            b.root.strokeColor = ContextCompat.getColor(ctx, if (selected) R.color.primary else R.color.divider)
+            b.imageSelected.setImageResource(if (selected) R.drawable.ic_check_circle else R.drawable.ic_radio_off)
+            b.imageSelected.imageTintList = android.content.res.ColorStateList.valueOf(
+                ContextCompat.getColor(ctx, if (selected) R.color.primary else R.color.gray)
+            )
+            b.root.setOnClickListener { onFastestClick() }
+        }
     }
 
     inner class HeaderVH(val b: ItemCountryBinding) : RecyclerView.ViewHolder(b.root) {

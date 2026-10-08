@@ -109,8 +109,13 @@ class MainActivity : AppCompatActivity() {
         (binding.recyclerServers.itemAnimator as? SimpleItemAnimator)?.supportsChangeAnimations = false
         adapter = HomeListAdapter(
             onHeaderClick = { group -> onCountryTapped(group) },
-            onServerClick = { server -> showTab(Tab.HOME); onServerTapped(server) },
-            onFavoriteClick = { group -> onFavoriteTapped(group) }
+            onServerClick = { server ->
+                appSettings.fastestServerMode = false // picking a specific server turns "Fastest Server" off
+                showTab(Tab.HOME)
+                onServerTapped(server)
+            },
+            onFavoriteClick = { group -> onFavoriteTapped(group) },
+            onFastestClick = { onFastestSelected() }
         )
         binding.recyclerServers.adapter = adapter
 
@@ -124,8 +129,6 @@ class MainActivity : AppCompatActivity() {
         setUpPremiumEntryPoints()
         ThemeUtil.bind(binding.buttonTheme)
         ThemeUtil.bind(binding.buttonThemeLocations)
-        binding.buttonFastest.setOnClickListener { connectToFastest() }
-        binding.buttonFastestLocations.setOnClickListener { showTab(Tab.HOME); connectToFastest() }
 
         binding.editSearch.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -251,6 +254,14 @@ class MainActivity : AppCompatActivity() {
         binding.tabAll.isSelected = locationFilter == LocationFilter.ALL
         binding.tabStreaming.isSelected = locationFilter == LocationFilter.STREAMING
         binding.tabFavorites.isSelected = locationFilter == LocationFilter.FAVORITES
+    }
+
+    /** Tapped the "Fastest Server" row: remember the option and connect to a random server now. */
+    private fun onFastestSelected() {
+        appSettings.fastestServerMode = true
+        renderRows()
+        showTab(Tab.HOME)
+        connectToFastest()
     }
 
     private fun onFavoriteTapped(group: CountryGroup) {
@@ -440,6 +451,8 @@ class MainActivity : AppCompatActivity() {
         val groups = CountryGroup.groupByCountry(filtered)
             .sortedByDescending { g -> connectedId != null && g.servers.any { it.id == connectedId } }
         val rows = mutableListOf<HomeRow>()
+        // The "Fastest Server" option sits at the very top of the full list.
+        if (locationFilter == LocationFilter.ALL && query.isEmpty() && groups.isNotEmpty()) rows.add(HomeRow.FastestRow)
         var nativeAdSlot = 0
         groups.forEachIndexed { index, group ->
             val expanded = expandedCountryCodes.contains(group.countryCode)
@@ -453,7 +466,7 @@ class MainActivity : AppCompatActivity() {
                 rows.add(HomeRow.NativeAdRow(nativeAdSlot++))
             }
         }
-        adapter.submit(rows, connectedId, favorites)
+        adapter.submit(rows, connectedId, favorites, appSettings.fastestServerMode)
 
         when {
             groups.isNotEmpty() -> binding.emptyState.visibility = View.GONE
@@ -532,6 +545,8 @@ class MainActivity : AppCompatActivity() {
     /** Power button while disconnected: reconnect to the last used location if there is
      *  one, otherwise fall back to a reachable server. */
     private fun connectToPreferred() {
+        // "Fastest Server" option on: always connect to a random reachable server.
+        if (appSettings.fastestServerMode) { connectToFastest(); return }
         val last = appSettings.lastConnectedServerId?.let { id ->
             allServers.find { it.id == id && it.enabled && it.pingMs != -2 }
         }
@@ -861,7 +876,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateCurrentLocation() {
         val server = currentServer()
-        if (server == null) {
+        if (appSettings.fastestServerMode && uiState() == UiState.DISCONNECTED) {
+            binding.textCurrentFlag.text = "⚡"
+            binding.textCurrentCountry.text = "Fastest Server"
+            binding.textCurrentCity.text = "Auto connect (random server)"
+            binding.signalCurrent.level = 4
+        } else if (server == null) {
             binding.textCurrentFlag.text = "🌐"
             binding.textCurrentCountry.text = "Fastest server"
             binding.textCurrentCity.text = "Automatic"
@@ -877,8 +897,6 @@ class MainActivity : AppCompatActivity() {
     private fun updateActionButton() {
         val busy = uiState() == UiState.CONNECTING
         binding.powerButton.isEnabled = !busy
-        binding.buttonFastest.isEnabled = !busy
-        binding.buttonFastestLocations.isEnabled = !busy
         binding.powerButton.contentDescription =
             if (tunnelManager.state == TunnelState.UP) "Disconnect" else "Connect"
         updateStatusCard()

@@ -84,7 +84,7 @@
                 <include android:id="@+id/rowHelp" layout="@layout/view_setting_row" android:layout_width="match_parent" android:layout_height="wrap_content" />
                 <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginStart="68dp" android:background="@color/divider" />
                 <include android:id="@+id/rowAdChoices" layout="@layout/view_setting_row" android:layout_width="match_parent" android:layout_height="wrap_content" />
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginStart="68dp" android:background="@color/divider" />
+                <View android:id="@+id/dividerAdChoices" android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginStart="68dp" android:background="@color/divider" />
                 <include android:id="@+id/rowPrivacy" layout="@layout/view_setting_row" android:layout_width="match_parent" android:layout_height="wrap_content" />
                 <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginStart="68dp" android:background="@color/divider" />
                 <include android:id="@+id/rowTerms" layout="@layout/view_setting_row" android:layout_width="match_parent" android:layout_height="wrap_content" />

@@ -108,3 +108,14 @@ adapters; `AdProvider` is the seam where such a provider would plug in.
   (waits up to AdConfig.DISCONNECT_AD_WAIT_MS = 6 s, only while the app is in the foreground). No ad when switching servers.
 - Home page: Meta native banner directly below the "Current Location" server card; normal bottom banner now tries
   Unity first (AdConfig.BANNER_ORDER), Meta as fallback. Settings no longer has a native banner.
+
+## Round 6
+- Unity Ads SDK 4.21.0 (latest Android release; same 4.19+ API, AGP 9 compatible).
+- Personalised ads are ON by default (no dialog) outside the EEA/UK/Switzerland; users can turn them off in
+  Settings > Personalised ads (switch). Inside those regions (or if the country can't be detected) the consent dialog is
+  still shown first, because consent is legally required there.
+- The "Fastest Server" button is gone. It is now the first row of the server list ("Fastest Server - Auto connect to a random
+  server"). While selected, the power button connects to a random reachable server; picking any specific server turns it off.
+
+## Round 7
+- Removed the 'Personalised ads' switch from Settings for everyone outside the EEA/UK/Switzerland. It stays visible only in those regions (consent withdrawal is a legal requirement there). To remove it everywhere, delete the `consentRegion` block in SettingsActivity.

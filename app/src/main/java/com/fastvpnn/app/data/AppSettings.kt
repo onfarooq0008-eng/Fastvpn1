@@ -96,6 +96,11 @@ class AppSettings(context: Context) {
 
     /** Whether the user has accepted the Privacy Policy / Terms on the consent
      *  screen shown before first use. Gates access to MainActivity. */
+    /** "Fastest Server" row selected in the server list: Connect picks a random reachable server. */
+    var fastestServerMode: Boolean
+        get() = prefs.getBoolean("fastest_server_mode", false)
+        set(value) = prefs.edit().putBoolean("fastest_server_mode", value).apply()
+
     /** Ad privacy choice: "unset" (never asked), "personalized" or "declined". See ads/AdsConsent.kt. */
     var adConsent: String
         get() = prefs.getString("ad_consent", "unset") ?: "unset"
