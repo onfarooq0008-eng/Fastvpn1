@@ -102,7 +102,7 @@ in-app admin UI.
 The domain root (`/`) is now a public marketing page for the app itself --
 what a visitor sees if they land on your domain. The admin panel moved to
 `/adminui` so it isn't the first thing a stranger sees. Update the
-`PLAY_STORE_URL` constant near the bottom of `api/public/index.html` once
+`PLAY_STORE_URL` constant near the bottom of `api/public/index.html` (already set to the live listing) once
 your Play Store listing is live -- until then the button shows "Coming soon".
 
 Open `http://<brain-vps-ip>:8080/adminui` (or `https://yourdomain/adminui` if

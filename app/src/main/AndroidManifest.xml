@@ -39,9 +39,6 @@
         android:networkSecurityConfig="@xml/network_security_config"
         tools:targetApi="36">
 
-        <meta-data
-            android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-3171485884518174~1946144621" />
 
         <activity
             android:name=".ui.SplashActivity"

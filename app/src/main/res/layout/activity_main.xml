@@ -39,7 +39,7 @@
                         android:background="?attr/selectableItemBackgroundBorderless"
                         android:contentDescription="Settings"
                         android:src="@drawable/ic_menu"
-                        app:tint="@color/white" />
+                        app:tint="@color/textPrimary" />
 
                     <LinearLayout
                         android:layout_width="wrap_content"
@@ -55,7 +55,7 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="Fast"
-                                android:textColor="@color/white"
+                                android:textColor="@color/textPrimary"
                                 android:textSize="34sp"
                                 android:textStyle="bold" />
                             <TextView
@@ -74,16 +74,30 @@
                             android:textSize="14sp" />
                     </LinearLayout>
 
-                    <ImageButton
-                        android:id="@+id/buttonCrown"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
                         android:layout_gravity="end|top"
-                        android:background="@drawable/bg_square_button"
-                        android:contentDescription="Go Premium"
-                        android:src="@drawable/ic_crown"
-                        android:visibility="invisible"
-                        app:tint="@color/gold" />
+                        android:orientation="horizontal">
+                        <ImageButton
+                            android:id="@+id/buttonCrown"
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
+                            android:layout_marginEnd="8dp"
+                            android:background="@drawable/bg_square_button"
+                            android:contentDescription="Go Premium"
+                            android:src="@drawable/ic_crown"
+                            android:visibility="gone"
+                            app:tint="@color/gold" />
+                        <ImageButton
+                            android:id="@+id/buttonTheme"
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
+                            android:background="@drawable/bg_square_button"
+                            android:contentDescription="Switch theme"
+                            android:src="@drawable/ic_theme_light"
+                            app:tint="@color/textPrimary" />
+                    </LinearLayout>
                 </FrameLayout>
 
                 <com.google.android.material.card.MaterialCardView
@@ -156,14 +170,14 @@
                             android:layout_height="64dp"
                             android:importantForAccessibility="no"
                             android:src="@drawable/ic_power"
-                            app:tint="@color/gray" />
+                            app:tint="@color/ringMuted" />
                         <TextView
                             android:id="@+id/textRingStatus"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="12dp"
                             android:text="TAP TO CONNECT"
-                            android:textColor="@color/gray"
+                            android:textColor="@color/ringMuted"
                             android:textSize="18sp"
                             android:textStyle="bold"
                             android:letterSpacing="0.02" />
@@ -195,11 +209,27 @@
                         android:textSize="13sp" />
                 </LinearLayout>
 
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/buttonFastest"
+                    android:layout_width="match_parent"
+                    android:layout_height="54dp"
+                    android:layout_marginTop="20dp"
+                    android:text="Fastest Server • Auto Connect"
+                    android:textAllCaps="false"
+                    android:textColor="@color/white"
+                    android:textSize="15sp"
+                    android:textStyle="bold"
+                    app:backgroundTint="@color/primary"
+                    app:cornerRadius="16dp"
+                    app:icon="@drawable/ic_bolt"
+                    app:iconGravity="textStart"
+                    app:iconTint="@color/white" />
+
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardCurrentLocation"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="22dp"
+                    android:layout_marginTop="14dp"
                     android:clickable="true"
                     android:focusable="true"
                     app:cardBackgroundColor="@color/cardBackground"
@@ -237,7 +267,7 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="Fastest server"
-                                android:textColor="@color/white"
+                                android:textColor="@color/textPrimary"
                                 android:textSize="20sp"
                                 android:textStyle="bold" />
                             <TextView
@@ -275,7 +305,7 @@
                         <TextView
                             android:layout_width="wrap_content" android:layout_height="wrap_content"
                             android:layout_marginTop="8dp" android:text="Super Fast"
-                            android:textColor="@color/white" android:textSize="15sp" android:textStyle="bold" />
+                            android:textColor="@color/textPrimary" android:textSize="15sp" android:textStyle="bold" />
                         <TextView
                             android:layout_width="wrap_content" android:layout_height="wrap_content"
                             android:text="Speed Boost" android:textColor="@color/gray" android:textSize="12sp" />
@@ -294,7 +324,7 @@
                         <TextView
                             android:layout_width="wrap_content" android:layout_height="wrap_content"
                             android:layout_marginTop="8dp" android:text="Secure"
-                            android:textColor="@color/white" android:textSize="15sp" android:textStyle="bold" />
+                            android:textColor="@color/textPrimary" android:textSize="15sp" android:textStyle="bold" />
                         <TextView
                             android:layout_width="wrap_content" android:layout_height="wrap_content"
                             android:text="Encryption" android:textColor="@color/gray" android:textSize="12sp" />
@@ -313,7 +343,7 @@
                         <TextView
                             android:layout_width="wrap_content" android:layout_height="wrap_content"
                             android:layout_marginTop="8dp" android:text="No Limits"
-                            android:textColor="@color/white" android:textSize="15sp" android:textStyle="bold" />
+                            android:textColor="@color/textPrimary" android:textSize="15sp" android:textStyle="bold" />
                         <TextView
                             android:layout_width="wrap_content" android:layout_height="wrap_content"
                             android:text="Unlimited Data" android:textColor="@color/gray" android:textSize="12sp" />
@@ -377,13 +407,22 @@
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="Back"
                     android:src="@drawable/ic_arrow_back"
-                    app:tint="@color/white" />
+                    app:tint="@color/textPrimary" />
+                <ImageButton
+                    android:id="@+id/buttonThemeLocations"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:layout_gravity="end|center_vertical"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="Switch theme"
+                    android:src="@drawable/ic_theme_light"
+                    app:tint="@color/textPrimary" />
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_gravity="center"
                     android:text="Server Location"
-                    android:textColor="@color/white"
+                    android:textColor="@color/textPrimary"
                     android:textSize="19sp"
                     android:textStyle="bold" />
             </FrameLayout>
@@ -432,9 +471,25 @@
                 android:inputType="text"
                 android:maxLines="1"
                 android:paddingHorizontal="16dp"
-                android:textColor="@color/white"
+                android:textColor="@color/textPrimary"
                 android:textColorHint="@color/gray"
                 android:textSize="14sp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/buttonFastestLocations"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginHorizontal="16dp"
+                android:layout_marginTop="10dp"
+                android:text="Fastest Server • Auto Connect"
+                android:textAllCaps="false"
+                android:textColor="@color/white"
+                android:textStyle="bold"
+                app:backgroundTint="@color/primary"
+                app:cornerRadius="14dp"
+                app:icon="@drawable/ic_bolt"
+                app:iconGravity="textStart"
+                app:iconTint="@color/white" />
 
             <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
                 android:id="@+id/swipeRefresh"
@@ -469,7 +524,7 @@
                             android:id="@+id/textEmptyTitle"
                             android:layout_width="wrap_content" android:layout_height="wrap_content"
                             android:layout_marginTop="16dp" android:text="No locations found"
-                            android:textColor="@color/white" android:textSize="18sp" android:textStyle="bold" />
+                            android:textColor="@color/textPrimary" android:textSize="18sp" android:textStyle="bold" />
                         <TextView
                             android:id="@+id/textEmptyBody"
                             android:layout_width="match_parent" android:layout_height="wrap_content"

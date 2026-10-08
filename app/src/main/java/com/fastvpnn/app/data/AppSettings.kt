@@ -20,9 +20,9 @@ class AppSettings(context: Context) {
         get() = prefs.getStringSet("favorite_countries", emptySet()) ?: emptySet()
         set(value) = prefs.edit().putStringSet("favorite_countries", value).apply()
 
-    /** "system", "light", or "dark". (The redesigned UI is dark-only; kept so old installs don't lose the value.) */
+    /** "system", "light", or "dark". Changed by the sun/moon button; new installs start in dark. */
     var themeMode: String
-        get() = prefs.getString("theme_mode", "system") ?: "system"
+        get() = prefs.getString("theme_mode", "dark") ?: "dark"
         set(value) = prefs.edit().putString("theme_mode", value).apply()
 
     /** Package names of apps that should bypass the VPN (split tunneling). */
@@ -96,6 +96,11 @@ class AppSettings(context: Context) {
 
     /** Whether the user has accepted the Privacy Policy / Terms on the consent
      *  screen shown before first use. Gates access to MainActivity. */
+    /** Ad privacy choice: "unset" (never asked), "personalized" or "declined". See ads/AdsConsent.kt. */
+    var adConsent: String
+        get() = prefs.getString("ad_consent", "unset") ?: "unset"
+        set(value) = prefs.edit().putString("ad_consent", value).apply()
+
     var hasAcceptedTerms: Boolean
         get() = prefs.getBoolean("has_accepted_terms", false)
         set(value) = prefs.edit().putBoolean("has_accepted_terms", value).apply()

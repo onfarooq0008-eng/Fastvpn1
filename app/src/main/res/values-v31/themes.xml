@@ -2,6 +2,7 @@
 <resources>
     <style name="Theme.FastVPN.Splash" parent="Theme.FastVPN">
         <item name="android:windowBackground">@color/launcherIconBg</item>
+        <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowSplashScreenBackground">@color/launcherIconBg</item>
         <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
     </style>

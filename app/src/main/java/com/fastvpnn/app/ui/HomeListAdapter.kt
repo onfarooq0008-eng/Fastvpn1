@@ -7,12 +7,12 @@ import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import com.fastvpnn.app.R
-import com.fastvpnn.app.ads.AdManager
+import com.fastvpnn.app.ads.AdsManager
+import com.fastvpnn.app.ads.NativeAdHandle
 import com.fastvpnn.app.data.Server
 import com.fastvpnn.app.databinding.ItemCountryBinding
 import com.fastvpnn.app.databinding.ItemNativeAdBinding
 import com.fastvpnn.app.databinding.ItemServerBinding
-import com.google.android.gms.ads.nativead.NativeAd
 
 private const val VIEW_TYPE_HEADER = 0
 private const val VIEW_TYPE_SERVER = 1
@@ -30,7 +30,9 @@ class HomeListAdapter(
 
     // Cache loaded native ads per slot so scrolling/refreshing the list doesn't burn
     // a fresh ad request every time; cleared ads are destroyed to avoid leaking webviews.
-    private val nativeAdCache = mutableMapOf<Int, NativeAd>()
+    private val nativeAdCache = mutableMapOf<Int, NativeAdHandle>()
+    private val loadingSlots = mutableSetOf<Int>()
+    private val failedSlots = mutableSetOf<Int>()
 
     fun submit(newItems: List<HomeRow>, connectedServerId: String?, favorites: Set<String>) {
         val oldItems = items.toList()
@@ -70,6 +72,8 @@ class HomeListAdapter(
     fun destroyAds() {
         nativeAdCache.values.forEach { it.destroy() }
         nativeAdCache.clear()
+        loadingSlots.clear()
+        failedSlots.clear()
     }
 
     override fun getItemViewType(position: Int): Int = when (items[position]) {
@@ -162,44 +166,46 @@ class HomeListAdapter(
     }
 
     inner class NativeAdVH(val b: ItemNativeAdBinding) : RecyclerView.ViewHolder(b.root) {
-        fun bind(slotId: Int) {
-            b.nativeAdView.headlineView = b.adHeadline
-            b.nativeAdView.bodyView = b.adBody
-            b.nativeAdView.iconView = b.adIcon
-            b.nativeAdView.callToActionView = b.adCallToAction
 
-            val cached = nativeAdCache[slotId]
-            if (cached != null) {
-                render(cached)
-                return
-            }
-            b.adHeadline.text = ""
-            b.adBody.text = ""
-            b.adCallToAction.text = ""
-            AdManager.loadNativeAd(b.root.context, onLoaded = { ad ->
-                nativeAdCache[slotId] = ad
-                // Guard against the row having been recycled/rebound to a different slot
-                // by the time the async ad load finishes.
-                if (bindingAdapterPosition != RecyclerView.NO_POSITION &&
-                    (items.getOrNull(bindingAdapterPosition) as? HomeRow.NativeAdRow)?.slotId == slotId
-                ) {
-                    render(ad)
-                }
-            })
+        /** The row stays collapsed (0 height) until an ad is actually loaded -- no blank cards. */
+        private fun setRowVisible(visible: Boolean) {
+            val lp = itemView.layoutParams
+            lp.height = if (visible) ViewGroup.LayoutParams.WRAP_CONTENT else 0
+            itemView.layoutParams = lp
+            itemView.visibility = if (visible) View.VISIBLE else View.GONE
         }
 
-        private fun render(ad: NativeAd) {
-            b.adHeadline.text = ad.headline.orEmpty()
-            b.adBody.text = ad.body.orEmpty()
-            b.adCallToAction.text = ad.callToAction ?: "Learn more"
-            val icon = ad.icon
-            if (icon != null) {
-                b.adIcon.setImageDrawable(icon.drawable)
-                b.adIcon.visibility = View.VISIBLE
-            } else {
-                b.adIcon.visibility = View.GONE
+        fun bind(slotId: Int) {
+            val cached = nativeAdCache[slotId]
+            if (cached != null && cached.isValid) {
+                setRowVisible(true)
+                cached.render(b)
+                return
             }
-            b.nativeAdView.setNativeAd(ad)
+            nativeAdCache.remove(slotId)?.destroy() // stale/invalidated -> request a fresh one
+            setRowVisible(false)
+            if (slotId in loadingSlots || slotId in failedSlots) return
+            loadingSlots.add(slotId)
+            AdsManager.loadNativeAd(
+                b.root.context,
+                onLoaded = { ad ->
+                    loadingSlots.remove(slotId)
+                    nativeAdCache[slotId] = ad
+                    // The row may have been recycled to another slot while loading.
+                    if (bindingAdapterPosition != RecyclerView.NO_POSITION &&
+                        (items.getOrNull(bindingAdapterPosition) as? HomeRow.NativeAdRow)?.slotId == slotId
+                    ) {
+                        setRowVisible(true)
+                        ad.render(b)
+                    } else {
+                        notifyDataSetChanged() // let whichever holder now shows this slot pick it up
+                    }
+                },
+                onFailed = {
+                    loadingSlots.remove(slotId)
+                    failedSlots.add(slotId) // don't hammer the network retrying a failing placement
+                }
+            )
         }
     }
 }

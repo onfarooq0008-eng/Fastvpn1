@@ -9,7 +9,7 @@ yourself, with:
 - **Automatic device registration** via a backend API baked into the app
   itself — every user who installs the app gets your servers automatically,
   zero setup on their end. See `/backend`.
-- **100% free, ad-supported** — no paywall, monetized entirely through AdMob
+- **100% free, ad-supported** — no paywall, monetized through Meta Audience Network
 - **Search**, **dark mode**, **split tunneling**, a **connection timer + data
   usage** counter, and a **persistent notification with a one-tap Disconnect
   button** while connected
@@ -27,7 +27,7 @@ yourself, with:
 1. Install **Android Studio** (Koala or newer) — or use GitHub Codespaces
    from your phone if you don't have a PC.
 2. `File > Open` → select the `FastVPN` folder. Let Gradle sync.
-3. Run on a device/emulator with Play Store services (needed for AdMob).
+3. Run on a device/emulator.
 
 The CI workflow (`.github/workflows/build.yml`) pins exact Gradle/Kotlin/AGP
 versions known to work together — don't bump one without checking the others
@@ -77,12 +77,13 @@ of the app uses it automatically, no per-device setup needed by anyone.
 
 ---
 
-## 4. AdMob
+## 4. Ads (Meta Audience Network + Unity Ads)
 
-1. Create an AdMob account, add your app, get your **App ID** and ad unit IDs.
-2. Replace the placeholder App ID in `AndroidManifest.xml` and the two ad
-   unit IDs in `ads/AdManager.kt`.
-3. **Never ship test IDs to production.**
+1. All IDs live in `app/src/main/java/com/fastvpnn/app/ads/AdConfig.kt` (Meta placement IDs, Unity game ID + placements,
+   frequency caps). Leave an ID empty to switch that format off.
+2. Debug builds always use test ads. Release builds use real ads (`USE_TEST_ADS` in `app/build.gradle`, per build type).
+3. Screens only call `AdsManager` -- never an ad SDK directly. See `UPGRADE_NOTES.md` for the full guide.
+4. Put each network's `app-ads.txt` line into `backend/api/public/app-ads.txt`.
 
 ---
 
@@ -119,7 +120,7 @@ Tell me when you're ready and I'll write the exact Caddy config for your domain.
 
 ## 6. Monetization
 
-No paywall, no subscriptions — every server is free. AdMob banner + interstitial only.
+No paywall, no subscriptions — every server is free. Meta + Unity banner/interstitial/rewarded, Meta native + native banner, app-open style ad.
 
 ---
 
@@ -160,7 +161,7 @@ the app process was recreated.
       ask me when you're ready and I'll set that up with GitHub Secrets so
       your keystore password never touches the repo).
 - [ ] **HTTPS backend** — see section 5.
-- [ ] **Real AdMob IDs** — see section 4.
+- [ ] **Real ad IDs in `AdConfig.kt`**, release build uses real ads — see section 4.
 - [ ] **Privacy Policy**, linked in Play Console → App content. Any VPN app
       needs one. Ask me and I'll help draft one based on what this app
       actually collects.
@@ -185,7 +186,7 @@ FastVPN/
                    split tunneling picker, settings, splash
     admin/        Admin login, panel (list/CRUD + backend URL), add/edit
                    server form
-    ads/          AdMob banner + interstitial manager
+    ads/          AdsManager + Meta/Unity providers, consent, config
     util/         Ping, secure on-device keystore, per-device tunnel address
                    derivation, notification helper, system VPN state check
   app/src/debug/  Debug-only cleartext HTTP config for local backend testing
@@ -202,7 +203,7 @@ rename or remove it.
 
 | Item | Where |
 |---|---|
-| AdMob App ID + ad unit IDs | `AndroidManifest.xml`, `ads/AdManager.kt` |
+| Ad network IDs + frequency caps | `ads/AdConfig.kt` |
 | App icon / branding | `res/mipmap-anydpi-v26`, `res/drawable` |
 | HTTPS for your backend | See section 5 |
 | Signing keystore | See section 9 |

@@ -16,6 +16,9 @@ import com.fastvpnn.app.R
 import com.fastvpnn.app.data.AppSettings
 import com.fastvpnn.app.databinding.ActivitySettingsBinding
 import com.fastvpnn.app.databinding.ViewSettingRowBinding
+import com.fastvpnn.app.ads.AdsConsent
+import com.fastvpnn.app.ads.AdsManager
+import com.fastvpnn.app.util.ThemeUtil
 import com.fastvpnn.app.util.applyEdgeToEdgeInsets
 
 /** Regular-user settings only. Server management is handled entirely by the
@@ -33,15 +36,23 @@ class SettingsActivity : AppCompatActivity() {
         settings = AppSettings(this)
 
         binding.buttonSettingsBack.setOnClickListener { finish() }
+        ThemeUtil.bind(binding.buttonThemeSettings)
         setUpBottomNav()
         setUpGeneral()
         setUpOther()
+        AdsManager.showNativeBanner(this, binding.nativeBannerContainer)
+    }
+
+    override fun onDestroy() {
+        AdsManager.hideNativeBanner(binding.nativeBannerContainer)
+        super.onDestroy()
     }
 
     override fun onResume() {
         super.onResume()
         // DNS may have been changed from the dialog; keep the subtitle current.
         binding.rowDns.rowSubtitle.text = dnsLabel()
+        binding.rowAdChoices.rowSubtitle.text = AdsConsent.summary(this)
     }
 
     private fun setUpBottomNav() {
@@ -120,22 +131,21 @@ class SettingsActivity : AppCompatActivity() {
     private fun setUpOther() {
         val siteBaseUrl = settings.backendApiUrl.trimEnd('/')
 
+        // Both open the Play Store listing (R.string.play_store_url).
         row(binding.rowRate, R.drawable.ic_star_border, "Rate Us", "If you like our app") {
-            val market = "market://details?id=$packageName".toUri()
-            try {
-                startActivity(Intent(Intent.ACTION_VIEW, market))
-            } catch (_: ActivityNotFoundException) {
-                openInBrowser("https://play.google.com/store/apps/details?id=$packageName")
-            }
+            openInBrowser(getString(R.string.play_store_url))
         }
         row(binding.rowShare, R.drawable.ic_share, "Share App", "Share with your friends") {
             val send = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
-                putExtra(Intent.EXTRA_TEXT, "Try FastVPN – fast, secure and private: https://play.google.com/store/apps/details?id=$packageName")
+                putExtra(Intent.EXTRA_TEXT, "Try FastVPN – fast, secure and private: ${getString(R.string.play_store_url)}")
             }
             startActivity(Intent.createChooser(send, "Share FastVPN"))
         }
         row(binding.rowHelp, R.drawable.ic_help, "Help & Support", "Get help when you need it") { openContactEmail() }
+        row(binding.rowAdChoices, R.drawable.ic_shield_check, "Ad privacy choices", AdsConsent.summary(this)) {
+            AdsConsent.showDialog(this) { binding.rowAdChoices.rowSubtitle.text = AdsConsent.summary(this) }
+        }
         row(binding.rowPrivacy, R.drawable.ic_lock, "Privacy Policy", "") { openInBrowser("$siteBaseUrl/privacy.html") }
         row(binding.rowTerms, R.drawable.ic_doc, "Terms & Conditions", "") { openInBrowser("$siteBaseUrl/terms.html") }
         row(binding.rowAbout, R.drawable.ic_info, "About", "FastVPN v${BuildConfig.VERSION_NAME}") {

@@ -2,8 +2,7 @@ package com.fastvpnn.app
 
 import android.app.Application
 import androidx.appcompat.app.AppCompatDelegate
-import com.fastvpnn.app.ads.AdManager
-import com.fastvpnn.app.ads.AppOpenAdManager
+import com.fastvpnn.app.ads.AdsManager
 import com.fastvpnn.app.data.AppSettings
 
 class FastVpnApp : Application() {
@@ -17,8 +16,7 @@ class FastVpnApp : Application() {
         // initialized normally here; first-run users get them initialized
         // from ConsentActivity's "I Agree" button instead.
         if (AppSettings(this).hasAcceptedTerms) {
-            AppOpenAdManager.attach(this)
-            AdManager.init(this)
+            AdsManager.init(this) // waits for the ad-privacy choice if the user hasn't made one yet
         }
     }
 

@@ -21,7 +21,8 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.SimpleItemAnimator
 import com.fastvpnn.app.BuildConfig
 import com.fastvpnn.app.R
-import com.fastvpnn.app.ads.AdManager
+import com.fastvpnn.app.ads.AdsConsent
+import com.fastvpnn.app.ads.AdsManager
 import com.fastvpnn.app.data.AppSettings
 import com.fastvpnn.app.data.Server
 import com.fastvpnn.app.data.ServerCache
@@ -29,6 +30,7 @@ import com.fastvpnn.app.data.ServerSource
 import com.fastvpnn.app.databinding.ActivityMainBinding
 import com.fastvpnn.app.util.NotificationHelper
 import com.fastvpnn.app.util.PingUtil
+import com.fastvpnn.app.util.ThemeUtil
 import com.fastvpnn.app.util.SecureKeyStore
 import com.fastvpnn.app.vpn.TunnelState
 import com.fastvpnn.app.vpn.VpnTunnelManager
@@ -120,6 +122,10 @@ class MainActivity : AppCompatActivity() {
 
         setUpNavigation()
         setUpPremiumEntryPoints()
+        ThemeUtil.bind(binding.buttonTheme)
+        ThemeUtil.bind(binding.buttonThemeLocations)
+        binding.buttonFastest.setOnClickListener { connectToFastest() }
+        binding.buttonFastestLocations.setOnClickListener { showTab(Tab.HOME); connectToFastest() }
 
         binding.editSearch.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -134,10 +140,18 @@ class MainActivity : AppCompatActivity() {
         binding.tabStreaming.setOnClickListener { setFilter(LocationFilter.STREAMING) }
         binding.tabFavorites.setOnClickListener { setFilter(LocationFilter.FAVORITES) }
         updateTabs()
-        showTab(tabFromIntent(intent))
+        // After a theme switch the activity is recreated: restore the tab and don't auto-connect again.
+        showTab(
+            if (savedInstanceState != null) Tab.values()[savedInstanceState.getInt(STATE_TAB, 0).coerceIn(0, 1)]
+            else tabFromIntent(intent)
+        )
 
         requestNotificationPermissionIfNeeded()
-        AdManager.loadBanner(binding.adContainer, this)
+        AdsManager.showBanner(this, binding.adContainer)
+        // First launch: ask for the ad-privacy choice once; ads only start after it.
+        if (savedInstanceState == null && AdsConsent.needsPrompt(this)) {
+            AdsConsent.showDialog(this)
+        }
 
         // Pick up the fetch SplashActivity already started while its logo was
         // showing, so this first load doesn't start the network call from zero.
@@ -154,13 +168,18 @@ class MainActivity : AppCompatActivity() {
                 updateStatusCard()
                 updateActionButton()
 
-                if (appSettings.autoConnectEnabled && tunnelManager.state == TunnelState.DOWN && !connectionFlowActive) {
+                if (savedInstanceState == null && appSettings.autoConnectEnabled && tunnelManager.state == TunnelState.DOWN && !connectionFlowActive) {
                     appSettings.lastConnectedServerId?.let { id ->
                         allServers.find { it.id == id }?.let { onServerTapped(it) }
                     }
                 }
             }
         })
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putInt(STATE_TAB, currentTab.ordinal)
     }
 
     private fun tabFromIntent(intent: Intent?): Tab =
@@ -243,6 +262,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         adapter.destroyAds()
+        AdsManager.hideBanner(binding.adContainer)
     }
 
     override fun onPause() {
@@ -260,6 +280,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        // Have an interstitial ready before the user taps Connect (no-op if one is already loaded/loading).
+        if (tunnelManager.state != TunnelState.UP) AdsManager.preloadInterstitial()
 
         // The backend tunnel state is authoritative for FastVPN. Android's generic
         // VPN transport flag is useful as a secondary signal, but it cannot tell us
@@ -469,6 +491,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun onActionButtonTapped() {
         if (tunnelManager.state == TunnelState.UP) {
+            // VPN is connected: never show an interstitial here, just disconnect.
+            disconnectFromHome()
+        } else {
+            connectToPreferred()
+        }
+    }
+
+    private fun disconnectFromHome() {
+        run {
             // Do not require connectedServer here. That field belongs to the Activity
             // and is lost when the Activity is recreated, while the WireGuard tunnel
             // can still be running. The notification can disconnect successfully in
@@ -491,8 +522,6 @@ class MainActivity : AppCompatActivity() {
                     updateActionButton()
                 }
             }
-        } else {
-            connectToPreferred()
         }
     }
 
@@ -505,17 +534,19 @@ class MainActivity : AppCompatActivity() {
         if (last != null) onServerTapped(last) else connectToFastest()
     }
 
+    /** "Fastest Server" button: connects to a random reachable server (spreads load instead of
+     *  everyone piling onto the lowest-ping box). While connected it hops to a different one. */
     private fun connectToFastest() {
-        // Despite the button's label, this picks a random reachable server rather
-        // than sorting by ping -- spreads load across servers instead of every
-        // user's "fastest" tap piling onto whichever one happens to measure
-        // lowest ping for them.
-        val reachable = allServers.filter { it.enabled && it.pingMs >= 0 }
-        if (reachable.isEmpty()) {
-            android.widget.Toast.makeText(this, "No reachable servers yet -- pull to refresh and try again", android.widget.Toast.LENGTH_SHORT).show()
+        if (tunnelManager.state == TunnelState.CONNECTING || connectionFlowActive) return
+        val currentId = if (tunnelManager.state == TunnelState.UP) connectedServer?.id else null
+        val usable = allServers.filter { it.enabled && it.id != currentId }
+        // Prefer servers that already answered a ping; fall back to ones not tested yet.
+        val candidates = usable.filter { it.pingMs >= 0 }.ifEmpty { usable.filter { it.pingMs == -1 } }
+        if (candidates.isEmpty()) {
+            Toast.makeText(this, "No reachable servers yet -- pull to refresh and try again", Toast.LENGTH_SHORT).show()
             return
         }
-        onServerTapped(reachable.random())
+        onServerTapped(candidates.random())
     }
 
     /** Up to 2 other reachable servers (by ping) to try automatically if the
@@ -565,7 +596,8 @@ class MainActivity : AppCompatActivity() {
                     releaseActiveRegistrationLease()
                     onDisconnected()
                     connectionFlowActive = true
-                    beginConnection(buildFailoverChain(server))
+                    // Switching servers while already connected: no interstitial.
+                    beginConnection(buildFailoverChain(server), showAd = false)
                 }
             }
             return
@@ -589,7 +621,7 @@ class MainActivity : AppCompatActivity() {
     /** Attempts chain[attemptIndex]; on failure (interface never came up, OR it came
      *  up but couldn't actually reach the internet -- see ConnectivityCheckUtil),
      *  automatically tries the next candidate instead of just failing outright. */
-    private fun beginConnection(chain: List<Server>, attemptIndex: Int = 0) {
+    private fun beginConnection(chain: List<Server>, attemptIndex: Int = 0, showAd: Boolean = true) {
         if (attemptIndex >= chain.size) {
             connectionFlowActive = false
             pendingChain = null
@@ -604,44 +636,19 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (attemptIndex == 0) {
-            // Ad-supported app: show an interstitial right before the first attempt --
-            // a natural pause point. Never on failover retries, that would be terrible UX.
-            AdManager.maybeShowInterstitial(this) { doConnect(chain, attemptIndex) }
+            if (showAd) {
+                // Fresh connect (VPN currently off): if an interstitial is already loaded, show it first, then
+                // connect. If none is ready, the connection starts immediately -- it never waits for an ad.
+                AdsManager.showConnectInterstitial(this) { doConnect(chain, attemptIndex) }
+            } else {
+                doConnect(chain, attemptIndex)
+            }
         } else {
             android.widget.Toast.makeText(
                 this, "${chain[attemptIndex - 1].name} didn't work, trying another server…", android.widget.Toast.LENGTH_SHORT
             ).show()
             doConnect(chain, attemptIndex)
         }
-    }
-
-    /** Everything doConnect() needs out of a successful registration call, bundled as
-     *  one immutable value instead of four separate nullable `var`s -- so the rest of
-     *  the function can use these fields directly with no null checks or `!!`. */
-    private data class Registration(
-        val server: Server,
-        val assignedAddressCidr: String,
-        val serverId: String,
-        val token: String
-    )
-
-    private suspend fun registerWithServer(server: Server): Registration {
-        val publicKey = keyStore.clientPublicKeyBase64()
-        val reg = serverSource.register(publicKey, preferredServerId = server.id)
-        if (reg.registrationToken.isNotBlank()) {
-            keyStore.addPendingRegistration(reg.serverId, reg.registrationToken)
-        }
-        return Registration(
-            server = server.copy(
-                endpointHost = reg.endpointHost,
-                endpointPort = reg.endpointPort,
-                serverPublicKey = reg.serverPublicKey,
-                dns = reg.dns
-            ),
-            assignedAddressCidr = "${reg.assignedAddress}/32",
-            serverId = reg.serverId,
-            token = reg.registrationToken
-        )
     }
 
     private fun doConnect(chain: List<Server>, attemptIndex: Int) {
@@ -776,6 +783,7 @@ class MainActivity : AppCompatActivity() {
         val green = ContextCompat.getColor(this, R.color.statusOnline)
         val red = ContextCompat.getColor(this, R.color.statusOffline)
         val gray = ContextCompat.getColor(this, R.color.gray)
+        val ringMuted = ContextCompat.getColor(this, R.color.ringMuted)
         val white = ContextCompat.getColor(this, R.color.white)
         val blue = ContextCompat.getColor(this, R.color.primary)
         when (uiState()) {
@@ -802,8 +810,8 @@ class MainActivity : AppCompatActivity() {
             UiState.DISCONNECTED -> {
                 binding.ringView.ringState = PowerRingView.State.DISCONNECTED
                 binding.textRingStatus.text = "TAP TO CONNECT"
-                binding.textRingStatus.setTextColor(gray)
-                binding.imagePower.imageTintList = ColorStateList.valueOf(gray)
+                binding.textRingStatus.setTextColor(ringMuted)
+                binding.imagePower.imageTintList = ColorStateList.valueOf(ringMuted)
                 binding.textProtected.text = "You're Not Protected"
                 binding.textProtected.setTextColor(red)
                 binding.imageProtected.setImageResource(R.drawable.ic_shield_off)
@@ -835,6 +843,8 @@ class MainActivity : AppCompatActivity() {
     private fun updateActionButton() {
         val busy = uiState() == UiState.CONNECTING
         binding.powerButton.isEnabled = !busy
+        binding.buttonFastest.isEnabled = !busy
+        binding.buttonFastestLocations.isEnabled = !busy
         binding.powerButton.contentDescription =
             if (tunnelManager.state == TunnelState.UP) "Disconnect" else "Connect"
         updateStatusCard()
@@ -897,5 +907,6 @@ class MainActivity : AppCompatActivity() {
         const val EXTRA_TAB = "tab"
         const val TAB_HOME = 0
         const val TAB_LOCATIONS = 1
+        private const val STATE_TAB = "state_tab"
     }
 }

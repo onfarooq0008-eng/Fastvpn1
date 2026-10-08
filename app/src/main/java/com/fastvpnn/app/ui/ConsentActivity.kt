@@ -4,8 +4,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
-import com.fastvpnn.app.ads.AdManager
-import com.fastvpnn.app.ads.AppOpenAdManager
 import com.fastvpnn.app.data.AppSettings
 import com.fastvpnn.app.data.ServerCache
 import com.fastvpnn.app.databinding.ActivityConsentBinding
@@ -15,7 +13,7 @@ import com.fastvpnn.app.util.applyEdgeToEdgeInsets
  * Shown once, before MainActivity is ever reached, on first launch. Gates
  * access behind explicit acceptance of the Privacy Policy / Terms -- required
  * for Play Store review of any VPN app (BIND_VPN_SERVICE is a sensitive
- * permission) and for AdMob. See backend/api/public/privacy.html and
+ * permission) and for ads (Meta Audience Network). See backend/api/public/privacy.html and
  * terms.html for the actual policy text -- served from AppSettings.backendApiUrl,
  * the same configurable backend host SettingsActivity's legal links use, rather
  * than a hardcoded domain that would silently go stale if that host ever changes.
@@ -46,8 +44,7 @@ class ConsentActivity : AppCompatActivity() {
 
         binding.buttonAgree.setOnClickListener {
             AppSettings(this).hasAcceptedTerms = true
-            AppOpenAdManager.attach(application)
-            AdManager.init(this)
+            // Ads start from MainActivity once the user has made their ad-privacy choice.
             // This is the one path to MainActivity that doesn't go through
             // SplashActivity, so it's the only other place that needs to start
             // the server prefetch -- otherwise a brand-new user's very first

@@ -33,6 +33,9 @@ android {
         // The "Go Premium" crown + banner from the new design. There is no paid tier or
         // billing in the app yet, so they stay hidden. Flip to true once Premium really exists.
         buildConfigField "boolean", "SHOW_PREMIUM", "false"
+
+        // Ad test mode is chosen per build type (see buildTypes below): debug = test ads,
+        // release = real ads. Ad IDs live in ads/AdConfig.kt.
     }
 
     signingConfigs {
@@ -48,6 +51,9 @@ android {
 
     buildTypes {
         release {
+            // REAL ads in the release build you publish. Flip to "true" to ship a release build
+            // that still shows only test ads (e.g. for a final QA pass).
+            buildConfigField "boolean", "USE_TEST_ADS", "false"
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
@@ -63,6 +69,8 @@ android {
             }
         }
         debug {
+            // Debug builds ALWAYS use test ads / test mode.
+            buildConfigField "boolean", "USE_TEST_ADS", "true"
         }
     }
 
@@ -104,8 +112,11 @@ dependencies {
     // Official WireGuard userspace backend for Android
     implementation 'com.wireguard.android:tunnel:1.0.20260102'
 
-    // AdMob
-    implementation 'com.google.android.gms:play-services-ads:25.0.0'
+    // Ads
+    // Meta Audience Network (banner, interstitial, rewarded, native, native banner). 6.21+ is required by Meta.
+    implementation 'com.facebook.android:audience-network-sdk:6.21.0'
+    // Unity Ads (banner, interstitial, rewarded). No native format exists in Unity Ads.
+    implementation 'com.unity3d.ads:unity-ads:4.20.0'
 
     // JSON parsing
     implementation 'com.google.code.gson:gson:2.11.0'

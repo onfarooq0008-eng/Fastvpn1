@@ -20,7 +20,7 @@
         android:background="@drawable/bg_icon_circle"
         android:importantForAccessibility="no"
         android:padding="9dp"
-        app:tint="@color/white" />
+        app:tint="@color/textPrimary" />
 
     <LinearLayout
         android:layout_width="0dp"
@@ -32,7 +32,7 @@
             android:id="@+id/rowTitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textColor="@color/white"
+            android:textColor="@color/textPrimary"
             android:textSize="16sp"
             android:textStyle="bold" />
         <TextView

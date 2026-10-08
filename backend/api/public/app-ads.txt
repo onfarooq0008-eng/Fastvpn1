@@ -1,1 +1,4 @@
-google.com, pub-1011974344745294, DIRECT, f08c47fec0942fa0
+# app-ads.txt for fastvpnn.pp.ua
+# Add the lines each network shows in its dashboard once your accounts are verified:
+#   Meta Audience Network (Monetization Manager -> app-ads.txt):  facebook.com, <YOUR_META_ID>, DIRECT, c3e20eee3f780d68
+#   Unity Ads (Unity Dashboard -> Monetization -> app-ads.txt):    unity.com, <YOUR_UNITY_ID>, DIRECT, 96cabb5fbdde37a7
