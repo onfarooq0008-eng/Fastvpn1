@@ -93,16 +93,14 @@ android {
 
 
 dependencies {
-    implementation 'androidx.core:core-ktx:1.13.1'
+    // Removed as unused (no code or layout referenced them): constraintlayout, cardview, coordinatorlayout,
+    // lifecycle-livedata-ktx, gson. Material already brings in whatever it needs transitively.
+    implementation 'androidx.core:core-ktx:1.17.0'
     implementation 'androidx.appcompat:appcompat:1.8.0'
-    implementation 'com.google.android.material:material:1.12.0'
-    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
-    implementation 'androidx.recyclerview:recyclerview:1.3.2'
-    implementation 'androidx.cardview:cardview:1.0.0'
-    implementation 'androidx.coordinatorlayout:coordinatorlayout:1.2.0'
-    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
+    implementation 'com.google.android.material:material:1.13.0'
+    implementation 'androidx.recyclerview:recyclerview:1.4.0'
+    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.2.0'
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.11.0'
-    implementation 'androidx.lifecycle:lifecycle-livedata-ktx:2.11.0'
     // Stable as of 1.1.0 (was pinned to a years-old 1.1.0-alpha06). Note: this
     // release also deprecates EncryptedSharedPreferences/MasterKey in favor of
     // DataStore + Tink -- the deprecated APIs are still fully functional here,
@@ -118,10 +116,7 @@ dependencies {
     // Unity Ads (banner, interstitial, rewarded). No native format exists in Unity Ads.
     implementation 'com.unity3d.ads:unity-ads:4.21.0'
 
-    // JSON parsing
-    implementation 'com.google.code.gson:gson:2.11.0'
-
-    // Networking (fetch remote servers.json, ping)
+    // Networking (backend API + ping)
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 
     // Coroutines

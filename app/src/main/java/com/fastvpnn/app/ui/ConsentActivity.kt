@@ -44,6 +44,7 @@ class ConsentActivity : AppCompatActivity() {
 
         binding.buttonAgree.setOnClickListener {
             AppSettings(this).hasAcceptedTerms = true
+            com.fastvpnn.app.ads.AdsManager.init(application)
             // Ads start from MainActivity once the user has made their ad-privacy choice.
             // This is the one path to MainActivity that doesn't go through
             // SplashActivity, so it's the only other place that needs to start

@@ -5,6 +5,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Android 13+ only hands the advertising ID to apps that declare this. Without it Meta/Unity get a
+         zeroed ID (worse ad fill and measurement). Also what the Play Console "Advertising ID" declaration refers to. -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
 
     <!-- This app never asks for location or file storage access; it has no
          feature that needs either. These explicit removals are a safety net,
@@ -31,6 +34,7 @@
     <application
         android:name=".FastVpnApp"
         android:allowBackup="false"
+        android:enableOnBackInvokedCallback="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher"

@@ -89,22 +89,52 @@ app.use(express.json({ limit: '10kb' })); // small, deliberate cap -- nothing we
 // full backend wipe/reinstall, an old cached response can make the
 // dashboard briefly show pre-wipe data again despite the server having
 // none. `no-store` forbids caching it anywhere, full stop.
+app.disable('x-powered-by'); // don't advertise "Express" to scanners
+
+// Basic hardening headers for every response (API + website + dashboard). The site uses inline scripts/styles,
+// Google Fonts and same-origin fetches only, hence this policy.
 app.use((req, res, next) => {
+  res.set({
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()',
+    'Strict-Transport-Security': 'max-age=31536000', // only honoured by browsers over HTTPS (Caddy terminates it)
+    'Content-Security-Policy':
+      "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+      "font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+  });
+  next();
+});
+
+// API responses (live server/registration state) must never be cached anywhere -- see the long note in git
+// history about stale dashboard data. Static files get their own rules below.
+app.use('/api', (req, res, next) => {
   res.set('Cache-Control', 'no-store');
   next();
 });
 
-app.use(express.static(PUBLIC_DIR));
+app.use(express.static(PUBLIC_DIR, {
+  setHeaders(res, filePath) {
+    if (/\.(html|txt)$/i.test(filePath)) {
+      res.set('Cache-Control', 'no-cache'); // pages: always revalidate, so dashboard/site updates show up immediately
+    } else {
+      res.set('Cache-Control', 'public, max-age=604800'); // logos/icons/images: cache for a week
+    }
+  },
+}));
 
 // express.static only auto-serves a file literally named "index.html" for
 // the root URL -- that's now our public marketing page (public/index.html).
 // The admin panel lives at /adminui instead, not on public root, so it isn't
 // the first thing a random visitor to the domain lands on.
 app.get('/', (req, res) => {
+  res.set('Cache-Control', 'no-cache'); // marketing page: always revalidate
   res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
 });
 
 app.get('/adminui', (req, res) => {
+  res.set('Cache-Control', 'no-store'); // admin dashboard shell: never cached
   res.sendFile(path.join(PUBLIC_DIR, 'adminui.html'));
 });
 

@@ -119,3 +119,14 @@ adapters; `AdProvider` is the seam where such a provider would plug in.
 
 ## Round 7
 - Removed the 'Personalised ads' switch from Settings for everyone outside the EEA/UK/Switzerland. It stays visible only in those regions (consent withdrawal is a legal requirement there). To remove it everywhere, delete the `consentRegion` block in SettingsActivity.
+
+## Round 8 -- project audit
+Updated: core-ktx 1.17.0, material 1.13.0, recyclerview 1.4.0, swiperefreshlayout 1.2.0 (all checked as current stable).
+Removed unused: constraintlayout, cardview, coordinatorlayout, lifecycle-livedata-ktx, gson (nothing referenced them) -> smaller APK.
+Manifest: AD_ID permission (needed for ad networks to get the advertising ID on Android 13+), predictive back enabled.
+ProGuard: readable crash line numbers in Play Console. Gradle: parallel + build cache, 3 GB heap.
+Backend: security headers (CSP, HSTS, nosniff, frame-deny, referrer, permissions), x-powered-by off; API stays no-store,
+website pages revalidate, images/logos cache for a week (was: nothing cached).
+Not changed on purpose: OkHttp 4.12 -> 5.x (major version, needs its own testing), Express 4 -> 5, EncryptedSharedPreferences
+(deprecated; migrating would reset stored keys), certificate pinning (needs your live cert hash).
+Play Console reminders: Data safety form (advertising ID, ads SDKs), Ads declaration, upload the mapping file (automatic with AAB).

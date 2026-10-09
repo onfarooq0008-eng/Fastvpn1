@@ -150,6 +150,9 @@ class MainActivity : AppCompatActivity() {
         )
 
         requestNotificationPermissionIfNeeded()
+        // Idempotent. Needed for first-run users: FastVpnApp only inits for returning users, and
+        // outside the EEA/UK/CH no dialog runs, so nothing else would start the ad SDKs.
+        AdsManager.init(application)
         AdsManager.showBanner(this, binding.adContainer)
         AdsManager.showNativeBanner(this, binding.nativeBannerHome)
         // First launch: ask for the ad-privacy choice once; ads only start after it.
