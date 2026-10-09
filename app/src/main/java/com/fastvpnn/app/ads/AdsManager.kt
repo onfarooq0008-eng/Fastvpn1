@@ -117,6 +117,17 @@ object AdsManager {
 
     fun isEnabled(): Boolean = adsEnabled
 
+    /** Plain-text ad status for Settings > About (long-press): mode, network states and the latest ad events. */
+    fun diagnostics(): String = buildString {
+        appendLine("Mode: ${if (AdConfig.isTestMode) "TEST ads" else "REAL ads"}")
+        appendLine("Ads started: $started, enabled: $adsEnabled")
+        providers.forEach { p ->
+            appendLine("${p.network}: ${p.initState}  banner=${p.hasBanner} interstitial=${p.hasInterstitial} (ready=${p.isInterstitialReady()}) native=${p.hasNative} nativeBanner=${p.hasNativeBanner}")
+        }
+        appendLine()
+        append(AdLog.history().ifEmpty { "(no ad events yet)" })
+    }
+
     // ============================ banner ============================
 
     private class UiRequest(val activity: WeakReference<Activity>, val container: WeakReference<ViewGroup>, val token: Int)

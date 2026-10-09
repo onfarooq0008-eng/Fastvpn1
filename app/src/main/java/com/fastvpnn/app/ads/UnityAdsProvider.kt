@@ -83,7 +83,7 @@ internal class UnityAdsProvider : AdProvider {
             UnityAds.initialize(config, InitializationListener { error ->
                 val ok = error == null
                 state = if (ok) InitState.READY else InitState.FAILED
-                AdLog.d("Unity initialized: success=$ok")
+                AdLog.d("Unity initialized: success=$ok${if (ok) "" else " error=$error"}")
                 onDone(ok)
             })
         } catch (t: Throwable) {

@@ -62,9 +62,21 @@ internal interface AdProvider {
 
 internal object AdLog {
     private const val TAG = "FastVPN-Ads"
-    /** Verbose logs only in debug builds. IDs are never logged in full and no user data is logged. */
-    fun d(msg: String) { if (BuildConfig.DEBUG) Log.d(TAG, "[ADS] $msg") }
-    fun w(msg: String) { Log.w(TAG, "[ADS] $msg") }
+    private val history = java.util.ArrayDeque<String>()
+
+    private fun record(msg: String) {
+        synchronized(history) {
+            if (history.size >= 60) history.removeFirst()
+            history.addLast(msg)
+        }
+    }
+
+    /** Logged in release too (adb logcat -s FastVPN-Ads) and kept for Settings > About (long-press). No user data is logged. */
+    fun d(msg: String) { Log.i(TAG, "[ADS] $msg"); record(msg) }
+    fun w(msg: String) { Log.w(TAG, "[ADS] $msg"); record(msg) }
+
+    /** The last ad events, oldest first, for the on-device ad status screen. */
+    fun history(): String = synchronized(history) { history.joinToString("\n") }
 }
 
 /** Per-format load throttle: one load at a time, exponential cool-down after failures, never a retry loop. */

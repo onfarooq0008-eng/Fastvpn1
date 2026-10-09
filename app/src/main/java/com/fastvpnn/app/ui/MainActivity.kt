@@ -155,8 +155,8 @@ class MainActivity : AppCompatActivity() {
         AdsManager.init(application)
         AdsManager.showBanner(this, binding.adContainer)
         AdsManager.showNativeBanner(this, binding.nativeBannerHome)
-        // First launch: ask for the ad-privacy choice once; ads only start after it.
-        if (savedInstanceState == null && AdsConsent.needsPrompt(this)) {
+        // Ads are required to use the app: ask until the user allows them (also after rotation / process restart).
+        if (AdsConsent.needsPrompt(this)) {
             AdsConsent.showDialog(this)
         }
 

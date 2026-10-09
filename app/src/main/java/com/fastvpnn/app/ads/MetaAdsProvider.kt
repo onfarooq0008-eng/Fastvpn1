@@ -25,6 +25,9 @@ import com.facebook.ads.RewardedVideoAd
 import com.facebook.ads.RewardedVideoAdListener
 import com.fastvpnn.app.databinding.ItemNativeAdBinding
 
+/** "code=1001 msg=..." so a no-fill / wrong-placement problem can be read straight from the log. */
+private fun describe(e: AdError?): String = "code=${e?.errorCode} msg=${e?.errorMessage}"
+
 /** Meta Audience Network implementation. All calls on the main thread. */
 internal class MetaAdsProvider : AdProvider {
 
@@ -99,7 +102,7 @@ internal class MetaAdsProvider : AdProvider {
             AdLog.d("Meta banner loading")
             val listener = object : AdListener {
                 override fun onError(ad: Ad?, error: AdError?) {
-                    AdLog.d("Meta banner failed: ${error?.errorCode}")
+                    AdLog.d("Meta banner failed: ${describe(error)}")
                     if (banner === view) destroyBanner()
                     onResult(false)
                 }
@@ -135,7 +138,7 @@ internal class MetaAdsProvider : AdProvider {
                     AdLog.d("Meta interstitial loaded")
                 }
                 override fun onError(failed: Ad?, error: AdError?) {
-                    AdLog.d("Meta interstitial error: ${error?.errorCode}")
+                    AdLog.d("Meta interstitial error: ${describe(error)}")
                     val cb = interstitialCallbacks
                     if (cb != null) { // happened while showing
                         interstitialCallbacks = null
@@ -199,7 +202,7 @@ internal class MetaAdsProvider : AdProvider {
                     AdLog.d("Meta rewarded loaded")
                 }
                 override fun onError(failed: Ad?, error: AdError?) {
-                    AdLog.d("Meta rewarded error: ${error?.errorCode}")
+                    AdLog.d("Meta rewarded error: ${describe(error)}")
                     val cb = rewardedCallbacks
                     if (cb != null) { rewardedCallbacks = null; rewarded = null; cb.onFailed() } else rewardedGate.failure()
                 }
@@ -253,7 +256,7 @@ internal class MetaAdsProvider : AdProvider {
             val listener = object : NativeAdListener {
                 override fun onMediaDownloaded(ad: Ad?) {}
                 override fun onError(ad: Ad?, error: AdError?) {
-                    AdLog.d("Meta native failed: ${error?.errorCode}")
+                    AdLog.d("Meta native failed: ${describe(error)}")
                     onFailed()
                 }
                 override fun onAdLoaded(ad: Ad?) {
@@ -283,7 +286,7 @@ internal class MetaAdsProvider : AdProvider {
             val listener = object : NativeAdListener {
                 override fun onMediaDownloaded(loaded: Ad?) {}
                 override fun onError(failed: Ad?, error: AdError?) {
-                    AdLog.d("Meta native banner failed: ${error?.errorCode}")
+                    AdLog.d("Meta native banner failed: ${describe(error)}")
                     if (nativeBanner === ad) destroyNativeBanner()
                     onResult(false)
                 }

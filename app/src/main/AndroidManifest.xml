@@ -32,6 +32,7 @@
     </queries>
 
     <application
+        android:hardwareAccelerated="true"
         android:name=".FastVpnApp"
         android:allowBackup="false"
         android:enableOnBackInvokedCallback="true"

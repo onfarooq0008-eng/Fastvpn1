@@ -106,6 +106,11 @@ class AppSettings(context: Context) {
         get() = prefs.getString("ad_consent", "unset") ?: "unset"
         set(value) = prefs.edit().putString("ad_consent", value).apply()
 
+    /** The user agreed to see ads (required to use the app). New key, so everyone is asked again after this update. */
+    var adsAccepted: Boolean
+        get() = prefs.getBoolean("ads_accepted_v1", false)
+        set(value) = prefs.edit().putBoolean("ads_accepted_v1", value).apply()
+
     var hasAcceptedTerms: Boolean
         get() = prefs.getBoolean("has_accepted_terms", false)
         set(value) = prefs.edit().putBoolean("has_accepted_terms", value).apply()

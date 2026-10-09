@@ -24,7 +24,7 @@ Modified: `app/build.gradle`, `FastVpnApp.kt`, `data/AppSettings.kt`, `ui/MainAc
 `backend/api/public/privacy.html`, `terms.html`, `app-ads.txt`, `README.md`.
 
 ### Dependencies added
-- `com.facebook.android:audience-network-sdk:6.21.0` (Meta requires 6.21+)
+- `com.facebook.android:audience-network-sdk:6.22.0` (newest on Maven Central, Jul 2026; Unity Ads 4.21.0 is already the newest, Oct 2026)
 - `com.unity3d.ads:unity-ads:4.20.0`
 
 ### Where to enter IDs
@@ -130,3 +130,17 @@ website pages revalidate, images/logos cache for a week (was: nothing cached).
 Not changed on purpose: OkHttp 4.12 -> 5.x (major version, needs its own testing), Express 4 -> 5, EncryptedSharedPreferences
 (deprecated; migrating would reset stored keys), certificate pinning (needs your live cert hash).
 Play Console reminders: Data safety form (advertising ID, ads SDKs), Ads declaration, upload the mapping file (automatic with AAB).
+
+## Round 9 - real ads not showing in the signed build
+
+- Meta Audience Network 6.21.0 -> 6.22.0. Unity Ads stays on 4.21.0 (newest; 4.20+ ships its own R8 rules for AGP 9).
+- IDs checked: Meta app 1437978778491299 with banner, interstitial, native and native-banner placements; Unity game 800391481 with `BP_Banner_Android` and `BP_Interstitial_Android`. Release and debug use the same IDs; only the test switch differs. No rewarded placement exists on either network, so rewarded is off.
+- Settings > About, long-press: shows "Ad status" (TEST/REAL mode, each network's init state, and the latest load results with the Meta error code and message). Works in the signed build, no adb needed.
+- Meta error codes that matter: 1001 no fill, 1203 first request must come from an app admin/developer/tester, 1011 placement/format mismatch, 2000 invalid placement ID, 1012 SDK too old for new apps.
+- CI already builds the signed APK and signed AAB (`assembleRelease` + `bundleRelease`) when the RELEASE_KEYSTORE_BASE64 secrets are set.
+
+## Round 10 - ads are required to use the app
+
+- First screen of the app asks "Allow ads". Allow starts Meta + Unity. "Don't allow" shows "Ads are required" with "Allow ads" or "Exit app".
+- The dialog cannot be cancelled and returns on every launch until ads are allowed. New storage key (`ads_accepted_v1`), so existing users are asked again after updating.
+- The Settings "Personalised ads" switch is hidden because ads can no longer be turned off.

@@ -17,6 +17,7 @@ import com.fastvpnn.app.data.AppSettings
 import com.fastvpnn.app.databinding.ActivitySettingsBinding
 import com.fastvpnn.app.databinding.ViewSettingRowBinding
 import com.fastvpnn.app.ads.AdsConsent
+import com.fastvpnn.app.ads.AdsManager
 import com.fastvpnn.app.util.ThemeUtil
 import com.fastvpnn.app.util.applyEdgeToEdgeInsets
 
@@ -136,21 +137,9 @@ class SettingsActivity : AppCompatActivity() {
             startActivity(Intent.createChooser(send, "Share FastVPN"))
         }
         row(binding.rowHelp, R.drawable.ic_help, "Help & Support", "Get help when you need it") { openContactEmail() }
-        // No "turn off personalised ads" option for users outside the EEA/UK/Switzerland.
-        // Inside them the switch stays: the law requires that consent can be withdrawn as easily as it was given.
-        val consentRegion = AdsConsent.requiresConsentRegion(this)
-        binding.rowAdChoices.root.visibility = if (consentRegion) View.VISIBLE else View.GONE
-        binding.dividerAdChoices.visibility = if (consentRegion) View.VISIBLE else View.GONE
-        if (consentRegion) {
-            row(binding.rowAdChoices, R.drawable.ic_shield_check, "Personalised ads", AdsConsent.summary(this), withSwitch = true) {
-                binding.rowAdChoices.rowSwitch.toggle()
-            }
-            binding.rowAdChoices.rowSwitch.isChecked = AdsConsent.decision(this) == AdsConsent.Decision.PERSONALIZED
-            binding.rowAdChoices.rowSwitch.setOnCheckedChangeListener { _, checked ->
-                AdsConsent.setPersonalized(this, checked)
-                binding.rowAdChoices.rowSubtitle.text = AdsConsent.summary(this)
-            }
-        }
+        // Ads are required to use the app, so there is no "turn off ads" switch.
+        binding.rowAdChoices.root.visibility = View.GONE
+        binding.dividerAdChoices.visibility = View.GONE
         row(binding.rowPrivacy, R.drawable.ic_lock, "Privacy Policy", "") { openInBrowser("$siteBaseUrl/privacy.html") }
         row(binding.rowTerms, R.drawable.ic_doc, "Terms & Conditions", "") { openInBrowser("$siteBaseUrl/terms.html") }
         row(binding.rowAbout, R.drawable.ic_info, "About", "FastVPN v${BuildConfig.VERSION_NAME}") {
@@ -159,6 +148,15 @@ class SettingsActivity : AppCompatActivity() {
                 .setMessage("Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})\n\nContact: ${getString(R.string.contact_email)}")
                 .setPositiveButton("OK", null)
                 .show()
+        }
+        // Long-press About: shows which ad network started and why an ad did not load (for QA / support).
+        binding.rowAbout.root.setOnLongClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("Ad status")
+                .setMessage(AdsManager.diagnostics())
+                .setPositiveButton("OK", null)
+                .show()
+            true
         }
     }
 
