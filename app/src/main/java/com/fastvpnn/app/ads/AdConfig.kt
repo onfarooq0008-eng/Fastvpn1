@@ -35,10 +35,10 @@ object AdConfig {
 
     private val META_DEBUG = MetaIds(
         appId = "1437978778491299",
-        bannerId = "1437978778491299_1437983005157543",
-        interstitialId = "1437978778491299_1437983435157500",
-        nativeId = "1437978778491299_1437983681824142",
-        nativeBannerId = "1437978778491299_1437984198490757",
+        bannerId = "1437978778491299_1440749758214201",
+        interstitialId = "1437978778491299_1440750218214155",
+        nativeId = "1437978778491299_1440750624880781",
+        nativeBannerId = "1437978778491299_1440751011547409",
         rewardedId = "",              // no Meta rewarded placement created yet
     )
     private val META_RELEASE = META_DEBUG.copy() // change any field here if release should use different placements
@@ -55,6 +55,12 @@ object AdConfig {
 
     /** Which network is tried first / second. Direct fallback, not formal mediation -- see UPGRADE_NOTES.md. */
     internal val PROVIDER_ORDER = listOf(AdNetwork.META, AdNetwork.UNITY)
+
+    /**
+     * Interstitials (Connect tap, after Disconnect, app-open): Meta first. If Meta has no ad ready (for example "no fill")
+     * or fails to show, the same moment falls through to Unity. Both networks are preloaded in parallel so Unity is ready.
+     */
+    internal val INTERSTITIAL_ORDER = listOf(AdNetwork.META, AdNetwork.UNITY)
 
     /** Banner: Unity first (normal banner), Meta as fallback. Interstitials keep PROVIDER_ORDER. */
     internal val BANNER_ORDER = listOf(AdNetwork.UNITY, AdNetwork.META)
@@ -97,6 +103,10 @@ object AdConfig {
     /** After a failed load, wait this long (doubling, capped) before another load is attempted. No timers, no loops. */
     const val LOAD_RETRY_BASE_MS = 20_000L
     const val LOAD_RETRY_MAX_MS = 5 * 60_000L
+
+    /** A banner that got "no fill" from every network is requested again after this long (doubling), at most this many times. */
+    const val UI_RETRY_BASE_MS = 60_000L
+    const val UI_RETRY_MAX_TRIES = 5
 
     // ---------------- helpers ----------------
 

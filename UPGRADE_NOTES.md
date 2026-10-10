@@ -144,3 +144,14 @@ Play Console reminders: Data safety form (advertising ID, ads SDKs), Ads declara
 - First screen of the app asks "Allow ads". Allow starts Meta + Unity. "Don't allow" shows "Ads are required" with "Allow ads" or "Exit app".
 - The dialog cannot be cancelled and returns on every launch until ads are allowed. New storage key (`ads_accepted_v1`), so existing users are asked again after updating.
 - The Settings "Personalised ads" switch is hidden because ads can no longer be turned off.
+
+## Round 11 - what the Ad status screen showed
+- Real ads, both SDKs READY. Unity interstitial loaded a real ad (works). Unity banner 52100 and every Meta format 1001 = "no fill" (the networks had nothing to serve), not an app bug.
+- Banners and the Home native banner now retry by themselves (60 s, 2 min, 4 min, 5 min, 5 min) when every network says no fill, so ads appear without restarting the app.
+- `backend/api/public/app-ads.txt` was an empty template. Paste the real lines from the Unity and Meta dashboards (see the comments inside) and redeploy; both networks use it to decide whether to bid on the app.
+
+## Round 12 - versions re-checked (Oct 2026) and interstitial order
+- Interstitials: Meta first, Unity when Meta has no ad ready or fails to show (`AdConfig.INTERSTITIAL_ORDER`). Both are preloaded in parallel.
+- App version 1.0.5 (code 5) so Play accepts a new upload.
+- Already newest: Meta Audience Network 6.22.0, Unity Ads 4.21.0, appcompat 1.8.0, recyclerview 1.4.0, swiperefreshlayout 1.2.0, lifecycle 2.11.0, security-crypto 1.1.0, coroutines 1.11.0, WireGuard tunnel 1.0.20260102.
+- Deliberately NOT upgraded (each needs its own tested change): core-ktx 1.18+ needs compileSdk 36.1; OkHttp 5.x changes some APIs; Material 1.14 can change the look; AGP 9.4 needs Gradle 9.6; Kotlin 2.4.10/2.4.20 are optional patch releases.

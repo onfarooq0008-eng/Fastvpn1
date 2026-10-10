@@ -41,6 +41,10 @@ object AdsManager {
         }
     }
 
+    private val interstitialProviders: List<AdProvider> by lazy {
+        AdConfig.INTERSTITIAL_ORDER.mapNotNull { n -> providers.firstOrNull { it.network == n } }
+    }
+
     private val bannerProviders: List<AdProvider> by lazy {
         AdConfig.BANNER_ORDER.mapNotNull { n -> providers.firstOrNull { it.network == n } }
     }
@@ -148,6 +152,7 @@ object AdsManager {
         container.visibility = View.GONE
         if (!adsEnabled && AdsConsent.decision(activity) != AdsConsent.Decision.UNSET) return
         bannerRequest = UiRequest(WeakReference(activity), WeakReference(container), ++bannerToken)
+        bannerRetries = 0
         tryBanner(0, bannerToken)
     }
 
@@ -191,6 +196,33 @@ object AdsManager {
             return
         }
         container.visibility = View.GONE
+        if (started) scheduleBannerRetry(token)
+    }
+
+    private var bannerRetries = 0
+    private var nativeBannerRetries = 0
+
+    /** Real ads can return "no fill" (common for new apps). Ask again later, a few times, never in a tight loop. */
+    private fun scheduleBannerRetry(token: Int) {
+        if (bannerRetries >= AdConfig.UI_RETRY_MAX_TRIES) return
+        val delay = (AdConfig.UI_RETRY_BASE_MS shl bannerRetries).coerceAtMost(AdConfig.LOAD_RETRY_MAX_MS)
+        bannerRetries++
+        AdLog.d("Banner: no ad from any network, trying again in ${delay / 1000}s")
+        main.postDelayed({
+            val req = bannerRequest
+            if (req != null && req.token == token && bannerActive == null && !bannerLoading) tryBanner(0, token)
+        }, delay)
+    }
+
+    private fun scheduleNativeBannerRetry(token: Int) {
+        if (nativeBannerRetries >= AdConfig.UI_RETRY_MAX_TRIES) return
+        val delay = (AdConfig.UI_RETRY_BASE_MS shl nativeBannerRetries).coerceAtMost(AdConfig.LOAD_RETRY_MAX_MS)
+        nativeBannerRetries++
+        AdLog.d("Native banner: no ad, trying again in ${delay / 1000}s")
+        main.postDelayed({
+            val req = nativeBannerRequest
+            if (req != null && req.token == token && nativeBannerActive == null && !nativeBannerLoading) tryNativeBanner(0, token)
+        }, delay)
     }
 
     // ============================ native banner ============================
@@ -200,6 +232,7 @@ object AdsManager {
         container.visibility = View.GONE
         if (!adsEnabled && AdsConsent.decision(activity) != AdsConsent.Decision.UNSET) return
         nativeBannerRequest = UiRequest(WeakReference(activity), WeakReference(container), ++nativeBannerToken)
+        nativeBannerRetries = 0
         tryNativeBanner(0, nativeBannerToken)
     }
 
@@ -242,6 +275,7 @@ object AdsManager {
             return
         }
         container.visibility = View.GONE
+        if (started) scheduleNativeBannerRetry(token)
     }
 
     private fun retryPendingUi() {
@@ -254,7 +288,7 @@ object AdsManager {
     fun preloadInterstitial() {
         val ctx = appContext ?: return
         if (!adsEnabled) return
-        providers.forEach { if (it.initState == InitState.READY && it.hasInterstitial) it.loadInterstitial(ctx) }
+        interstitialProviders.forEach { if (it.initState == InitState.READY && it.hasInterstitial) it.loadInterstitial(ctx) }
     }
 
     fun isInterstitialReady(): Boolean = adsEnabled && providers.any { it.initState == InitState.READY && it.isInterstitialReady() }
@@ -347,8 +381,8 @@ object AdsManager {
     }
 
     private fun showInterstitialFrom(startIndex: Int, activity: Activity, label: String, done: () -> Unit) {
-        for (i in startIndex until providers.size) {
-            val p = providers[i]
+        for (i in startIndex until interstitialProviders.size) {
+            val p = interstitialProviders[i]
             if (p.initState != InitState.READY || !p.isInterstitialReady()) continue
             var displayed = false
             var settled = false
