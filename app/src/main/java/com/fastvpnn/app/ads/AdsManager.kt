@@ -133,6 +133,8 @@ object AdsManager {
                     scheduleRetry(forToken)
                 }
 
+                // Required since Unity Ads 4.21 (the interface gained this callback).
+                override fun onBannerShown(bannerAdView: BannerView?) {}
                 override fun onBannerClick(bannerAdView: BannerView?) {}
                 override fun onBannerLeftApplication(bannerAdView: BannerView?) {}
             }
