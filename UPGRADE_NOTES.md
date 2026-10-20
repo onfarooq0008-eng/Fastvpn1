@@ -155,3 +155,40 @@ Play Console reminders: Data safety form (advertising ID, ads SDKs), Ads declara
 - App version 1.0.5 (code 5) so Play accepts a new upload.
 - Already newest: Meta Audience Network 6.22.0, Unity Ads 4.21.0, appcompat 1.8.0, recyclerview 1.4.0, swiperefreshlayout 1.2.0, lifecycle 2.11.0, security-crypto 1.1.0, coroutines 1.11.0, WireGuard tunnel 1.0.20260102.
 - Deliberately NOT upgraded (each needs its own tested change): core-ktx 1.18+ needs compileSdk 36.1; OkHttp 5.x changes some APIs; Material 1.14 can change the look; AGP 9.4 needs Gradle 9.6; Kotlin 2.4.10/2.4.20 are optional patch releases.
+
+
+## v1.0.5: Meta only, disconnect-only interstitial
+- Unity Ads removed completely (SDK dependency, provider, IDs, ProGuard rules, consent/privacy text). Meta Audience Network is the only network.
+- Interstitial now appears only after the user DISCONNECTS. Removed: connect-tap interstitial and the app-open style ad (`AppOpenAdManager`).
+- Fixed Meta code 1002 ("Ad was re-loaded too frequently"): a queued retry now owns the next banner/native-banner request, so SDK-init and consent callbacks no longer fire an extra request right after a no-fill.
+- New optional `AdConfig.META_TEST_DEVICE_HASHES`: a listed device always gets Meta test ads, even in release, to prove the integration works.
+- Meta code 1001 (no fill) is a server-side answer. Per Meta's docs, common causes are: the device is not logged into the Facebook app, the account has no ad inventory for the user, and requests from the app's own developer device being limited. Check in Monetization Manager that the app is approved and linked to its live Play Store URL.
+
+
+## v1.0.5 (update): Unity Ads only -- Meta removed
+- Meta Audience Network SDK removed completely (dependency, `MetaAdsProvider.kt`, ProGuard rules, IDs, Meta privacy flags, privacy/terms text, `facebook.com` line in app-ads.txt).
+- Remaining ads: Unity banner (above the bottom bar) and ONE Unity interstitial, shown only after the user DISCONNECTS. Nothing on connect, nothing on app open.
+- Removed formats: native ad rows in the server list, the native banner on the Home screen (`item_native_ad.xml`, `HomeRow.NativeAdRow`), rewarded.
+- New: `UnityAdsProvider.kt` (Unity Ads 4.21.0, Game ID `800391481`, placements `BP_Banner_Android` / `BP_Interstitial_Android`). IDs live in `AdConfig.kt`.
+- `AdsManager` / `AdProvider` slimmed to banner + interstitial. Screens still only call `AdsManager`.
+- To do: add Unity's own line to `backend/api/public/app-ads.txt`; update the Play Console Data safety form if it still lists Meta.
+- Not compiled in this environment (no Gradle/network). Run one CI/Android Studio build to confirm.
+
+
+## v1.0.5 (update 2): all ads removed
+- Unity Ads SDK removed. The whole `ads/` package, the "Allow ads" gate, the banner container, Settings ad rows/diagnostics, `USE_TEST_ADS`, the AD_ID permission, `adsAccepted`/`adConsent` settings, ad text in privacy/terms and `app-ads.txt` are gone.
+- Play Console: set the Ads declaration to "No ads", update Data safety (no advertising ID).
+
+
+## v1.0.5 (update 3): full project audit
+App: shared HTTP client; key store opened once, off the main thread, with recovery from a corrupted keystore; rapid taps can no longer start two connects/disconnects; a failed server fetch is retried instead of leaving the first screen empty; no duplicate server fetch on every resume; a connect cancelled by Activity recreation now cleans up its tunnel and lease; ping timeouts now really fire; split-tunnel/DNS changes reconnect a live tunnel; uninstalled apps in the split-tunnel list can no longer break every connect; the UI notices a Disconnect done from the notification; server list rows only rebind when they changed; app icons load lazily.
+Backend: constant-time key checks (API + agent); every agent call has a timeout; peer changes on the agent are serialized (concurrent `wg-quick save` calls used to overlap); a failing prune sweep can no longer crash the API; secret files are owner-only; stale duplicate `dashboard.html` removed (its redirect never ran); backend tests now run in CI.
+Removed: 7 unused drawables, 6 unused colors, 2 unused strings, 1 unused style, unused `androidTestImplementation`, `generateKeyPair`, `isUsingDefaultBackend`, stray root `build.yml`.
+NOT done / needs you: a real Gradle build and on-device test (see the audit report), `gradle-wrapper.jar` is missing from the project (Android Studio recreates it), jitpack.io repo left in settings.gradle (verify nothing needs it, then remove).
+
+
+## v1.0.5 (update 4): Unity Ads back, banner only
+- Added Unity Ads 4.21.0 (Game ID `800391481`, banner `BP_Banner_Android`). Only a banner; no interstitial/native/rewarded.
+- New `ads/` package: `AdConfig`, `AdsConsent` (Allow-ads gate, as before), `AdsManager` (init + banner with no-fill retries).
+- Restored: AD_ID permission, `adContainer` above the bottom nav, `USE_TEST_ADS` build flags, `adsAccepted` setting, ad text in privacy/terms, `app-ads.txt` (Organization core ID `18968517092189`).
+- The Settings "Ad choices" row and the long-press ad diagnostics stay removed.

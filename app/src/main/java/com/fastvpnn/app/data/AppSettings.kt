@@ -1,6 +1,7 @@
 package com.fastvpnn.app.data
 
 import android.content.Context
+import com.fastvpnn.app.BuildConfig
 
 /** Simple app-level toggles surfaced in SettingsActivity. */
 class AppSettings(context: Context) {
@@ -45,12 +46,9 @@ class AppSettings(context: Context) {
     var backendApiUrl: String
         get() {
             val override = prefs.getString("backend_api_url", "") ?: ""
-            return override.ifBlank { com.fastvpnn.app.BuildConfig.DEFAULT_BACKEND_API_URL }
+            return override.ifBlank { BuildConfig.DEFAULT_BACKEND_API_URL }
         }
         set(value) = prefs.edit().putString("backend_api_url", value.trim()).apply()
-
-    /** True if this device is using the compiled-in default rather than a manual override. */
-    fun isUsingDefaultBackend(): Boolean = (prefs.getString("backend_api_url", "") ?: "").isBlank()
 
     /**
      * DNS used inside the tunnel. "server" (default) keeps whatever the connected
@@ -69,16 +67,15 @@ class AppSettings(context: Context) {
         set(value) = prefs.edit().putString("custom_dns", value.trim()).apply()
 
     /**
-     * Set by SettingsActivity whenever [dnsMode] or [customDns] changes. A DNS
-     * resolver is part of the WireGuard interface config, which Android can only
-     * apply by re-establishing the tunnel -- there is no way to push a new DNS
-     * server into an already-running VPN interface. Without this flag, changing
-     * the setting while connected silently does nothing until the user happens
-     * to disconnect and reconnect on their own, which looks exactly like "the
-     * setting doesn't work". MainActivity.onResume() checks this and, if a
-     * tunnel is currently up, transparently reconnects to apply it.
+     * Set whenever a setting that is baked into the WireGuard interface config changes
+     * ([dnsMode]/[customDns] from Settings, or the split-tunnel app list). Android can only apply
+     * those by re-establishing the tunnel -- there is no way to push them into an already-running
+     * VPN interface -- so without this flag the change silently does nothing until the user
+     * happens to reconnect, which looks exactly like "the setting doesn't work".
+     * MainActivity.onResume() checks this and, if a tunnel is currently up, transparently
+     * reconnects to apply it. (The stored key keeps its original name so nothing is lost on update.)
      */
-    var dnsChangePendingReconnect: Boolean
+    var settingsChangePendingReconnect: Boolean
         get() = prefs.getBoolean("dns_change_pending_reconnect", false)
         set(value) = prefs.edit().putBoolean("dns_change_pending_reconnect", value).apply()
 
@@ -94,23 +91,18 @@ class AppSettings(context: Context) {
         else -> serverDns
     }
 
-    /** Whether the user has accepted the Privacy Policy / Terms on the consent
-     *  screen shown before first use. Gates access to MainActivity. */
     /** "Fastest Server" row selected in the server list: Connect picks a random reachable server. */
     var fastestServerMode: Boolean
         get() = prefs.getBoolean("fastest_server_mode", false)
         set(value) = prefs.edit().putBoolean("fastest_server_mode", value).apply()
 
-    /** Ad privacy choice: "unset" (never asked), "personalized" or "declined". See ads/AdsConsent.kt. */
-    var adConsent: String
-        get() = prefs.getString("ad_consent", "unset") ?: "unset"
-        set(value) = prefs.edit().putString("ad_consent", value).apply()
-
-    /** The user agreed to see ads (required to use the app). New key, so everyone is asked again after this update. */
+    /** The user agreed to see ads (required to use the app). */
     var adsAccepted: Boolean
         get() = prefs.getBoolean("ads_accepted_v1", false)
         set(value) = prefs.edit().putBoolean("ads_accepted_v1", value).apply()
 
+    /** Whether the user has accepted the Privacy Policy / Terms on the consent
+     *  screen shown before first use. Gates access to MainActivity. */
     var hasAcceptedTerms: Boolean
         get() = prefs.getBoolean("has_accepted_terms", false)
         set(value) = prefs.edit().putBoolean("has_accepted_terms", value).apply()

@@ -12,3 +12,11 @@ keystore.properties
 .idea
 *.iml
 local.properties
+
+# Backend secrets and runtime data -- these hold the admin key, every VPS agent key and device registrations.
+backend/api/data/*
+!backend/api/data/.gitkeep
+!backend/api/data/servers_example.json
+backend/agent/agent.config.json
+node_modules/
+*.log

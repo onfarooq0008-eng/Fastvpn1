@@ -71,9 +71,11 @@ class VpnTunnelManager(private val context: Context) {
     }
 
     private val backend = GoBackend(context)
-    private var currentTunnel: SimpleTunnel? = null
+    @Volatile private var currentTunnel: SimpleTunnel? = null
     private val operationMutex = Mutex()
 
+    // Read from the UI thread, the notification receiver and IO threads.
+    @Volatile
     var state: TunnelState = TunnelState.DOWN
         private set
 
@@ -81,9 +83,6 @@ class VpnTunnelManager(private val context: Context) {
         override fun getName(): String = tunnelName
         override fun onStateChange(newState: Tunnel.State) { /* observed via manager */ }
     }
-
-    /** Call once and persist the returned key pair (store private key securely, e.g. EncryptedSharedPreferences). */
-    fun generateKeyPair(): com.wireguard.crypto.KeyPair = com.wireguard.crypto.KeyPair()
 
     suspend fun connect(
         server: Server,
@@ -153,7 +152,12 @@ class VpnTunnelManager(private val context: Context) {
     suspend fun disconnect(): Result<Unit> = withContext(Dispatchers.IO) {
         operationMutex.withLock {
         try {
-            currentTunnel?.let { backend.setState(it, Tunnel.State.DOWN, null) }
+            // If this manager lost its handle (e.g. the tunnel was brought up by an earlier
+            // Activity instance) but the tunnel is really running, take it down anyway --
+            // otherwise this would report "success" while the VPN stays up.
+            val tunnel = currentTunnel
+                ?: if (backend.getRunningTunnelNames().contains(TUNNEL_NAME)) SimpleTunnel(TUNNEL_NAME) else null
+            tunnel?.let { backend.setState(it, Tunnel.State.DOWN, null) }
             currentTunnel = null
             state = TunnelState.DOWN
             Log.d(TAG, "disconnect: tunnel torn down")

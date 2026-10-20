@@ -7,17 +7,13 @@ import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import com.fastvpnn.app.R
-import com.fastvpnn.app.ads.AdsManager
-import com.fastvpnn.app.ads.NativeAdHandle
 import com.fastvpnn.app.data.Server
 import com.fastvpnn.app.databinding.ItemCountryBinding
 import com.fastvpnn.app.databinding.ItemFastestBinding
-import com.fastvpnn.app.databinding.ItemNativeAdBinding
 import com.fastvpnn.app.databinding.ItemServerBinding
 
 private const val VIEW_TYPE_HEADER = 0
 private const val VIEW_TYPE_SERVER = 1
-private const val VIEW_TYPE_NATIVE_AD = 2
 private const val VIEW_TYPE_FASTEST = 3
 
 class HomeListAdapter(
@@ -32,60 +28,56 @@ class HomeListAdapter(
     private var favorites: Set<String> = emptySet()
     private var fastestSelected = false
 
-    // Cache loaded native ads per slot so scrolling/refreshing the list doesn't burn
-    // a fresh ad request every time; cleared ads are destroyed to avoid leaking webviews.
-    private val nativeAdCache = mutableMapOf<Int, NativeAdHandle>()
-    private val loadingSlots = mutableSetOf<Int>()
-    private val failedSlots = mutableSetOf<Int>()
+    // What each row looked like when it was last shown. Ping times are mutated in place on shared
+    // Server objects, so comparing the row objects themselves can never see them change -- a snapshot
+    // string per row can. DiffUtil then only rebinds rows whose snapshot differs (and scroll position
+    // and ripple state of everything else are left alone on every 30 s refresh).
+    private var signatures: List<String> = emptyList()
 
     fun submit(newItems: List<HomeRow>, connectedServerId: String?, favorites: Set<String>, fastestSelected: Boolean = false) {
         val oldItems = items.toList()
-        val connectedIdChanged = this.connectedServerId != connectedServerId
+        val oldSignatures = signatures
         this.connectedServerId = connectedServerId
         this.favorites = favorites
         this.fastestSelected = fastestSelected
+        val newSignatures = newItems.map { signature(it) }
         val diff = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
             override fun getOldListSize() = oldItems.size
             override fun getNewListSize() = newItems.size
             override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean =
                 rowKey(oldItems[oldItemPosition]) == rowKey(newItems[newItemPosition])
-            override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
-                // Ping times are mutated in place on shared Server objects, so data-class
-                // equality can't see them change. Rebind server/country rows every time
-                // (cheap; MainActivity turns off change animations). Ads stay untouched.
-                return newItems[newItemPosition] is HomeRow.NativeAdRow &&
-                    oldItems[oldItemPosition] == newItems[newItemPosition]
-            }
+            override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean =
+                oldSignatures[oldItemPosition] == newSignatures[newItemPosition]
         })
         items.clear()
         items.addAll(newItems)
-        // DiffUtil instead of notifyDataSetChanged(): now that the list also
-        // auto-refreshes every 20s (see MainActivity), a full reset would rebind
-        // every visible row -- including flashing native ads -- on every tick. This
-        // only touches rows that actually changed, so everything else (and scroll
-        // position) holds still.
+        signatures = newSignatures
         diff.dispatchUpdatesTo(this)
+    }
+
+    private fun signature(row: HomeRow): String = when (row) {
+        is HomeRow.Header -> {
+            val g = row.group
+            "H|${g.countryCode}|${g.countryName}|${g.servers.size}|${g.servers.firstOrNull()?.city}|${row.expanded}|" +
+                "${g.bestPingMs()}|${connectedServerId != null && g.servers.any { it.id == connectedServerId }}|" +
+                favorites.contains(g.countryCode)
+        }
+        is HomeRow.ServerRow -> {
+            val s = row.server
+            "S|${s.id}|${s.name}|${s.countryName}|${s.city}|${s.pingMs}|${connectedServerId == s.id}"
+        }
+        is HomeRow.FastestRow -> "F|$fastestSelected"
     }
 
     private fun rowKey(row: HomeRow): Any = when (row) {
         is HomeRow.Header -> "header_${row.group.countryCode}"
         is HomeRow.ServerRow -> "server_${row.server.id}"
-        is HomeRow.NativeAdRow -> "ad_${row.slotId}"
         is HomeRow.FastestRow -> "fastest"
-    }
-
-    /** Call from the host Activity's onDestroy to release native ad resources. */
-    fun destroyAds() {
-        nativeAdCache.values.forEach { it.destroy() }
-        nativeAdCache.clear()
-        loadingSlots.clear()
-        failedSlots.clear()
     }
 
     override fun getItemViewType(position: Int): Int = when (items[position]) {
         is HomeRow.Header -> VIEW_TYPE_HEADER
         is HomeRow.ServerRow -> VIEW_TYPE_SERVER
-        is HomeRow.NativeAdRow -> VIEW_TYPE_NATIVE_AD
         is HomeRow.FastestRow -> VIEW_TYPE_FASTEST
     }
 
@@ -93,7 +85,6 @@ class HomeListAdapter(
         return when (viewType) {
             VIEW_TYPE_HEADER -> HeaderVH(ItemCountryBinding.inflate(LayoutInflater.from(parent.context), parent, false))
             VIEW_TYPE_FASTEST -> FastestVH(ItemFastestBinding.inflate(LayoutInflater.from(parent.context), parent, false))
-            VIEW_TYPE_NATIVE_AD -> NativeAdVH(ItemNativeAdBinding.inflate(LayoutInflater.from(parent.context), parent, false))
             else -> ServerVH(ItemServerBinding.inflate(LayoutInflater.from(parent.context), parent, false))
         }
     }
@@ -102,12 +93,14 @@ class HomeListAdapter(
         when (val row = items[position]) {
             is HomeRow.Header -> (holder as HeaderVH).bind(row)
             is HomeRow.ServerRow -> (holder as ServerVH).bind(row.server)
-            is HomeRow.NativeAdRow -> (holder as NativeAdVH).bind(row.slotId)
             is HomeRow.FastestRow -> (holder as FastestVH).bind()
         }
     }
 
     override fun getItemCount() = items.size
+
+    private inline fun <reified T : HomeRow> currentRow(holder: RecyclerView.ViewHolder): T? =
+        items.getOrNull(holder.bindingAdapterPosition) as? T
 
     private fun connectedStyle(card: com.google.android.material.card.MaterialCardView, connected: Boolean, normalBg: Int) {
         val ctx = card.context
@@ -124,6 +117,9 @@ class HomeListAdapter(
             b.imageSelected.imageTintList = android.content.res.ColorStateList.valueOf(
                 ContextCompat.getColor(ctx, if (selected) R.color.primary else R.color.gray)
             )
+        }
+
+        init {
             b.root.setOnClickListener { onFastestClick() }
         }
     }
@@ -162,8 +158,11 @@ class HomeListAdapter(
                 ContextCompat.getColor(ctx, if (fav) R.color.gold else R.color.gray)
             )
             b.buttonFavorite.contentDescription = if (fav) "Remove from favorites" else "Add to favorites"
-            b.buttonFavorite.setOnClickListener { onFavoriteClick(group) }
-            b.root.setOnClickListener { onHeaderClick(group) }
+        }
+
+        init {
+            b.buttonFavorite.setOnClickListener { currentRow<HomeRow.Header>(this)?.let { onFavoriteClick(it.group) } }
+            b.root.setOnClickListener { currentRow<HomeRow.Header>(this)?.let { onHeaderClick(it.group) } }
         }
     }
 
@@ -183,51 +182,11 @@ class HomeListAdapter(
             b.signal.level = SignalBarsView.levelForPing(server.pingMs)
             b.textConnected.visibility = if (connected) View.VISIBLE else View.GONE
             connectedStyle(b.root, connected, R.color.rowBackground)
-            b.root.setOnClickListener { onServerClick(server) }
+        }
+
+        init {
+            b.root.setOnClickListener { currentRow<HomeRow.ServerRow>(this)?.let { onServerClick(it.server) } }
         }
     }
 
-    inner class NativeAdVH(val b: ItemNativeAdBinding) : RecyclerView.ViewHolder(b.root) {
-
-        /** The row stays collapsed (0 height) until an ad is actually loaded -- no blank cards. */
-        private fun setRowVisible(visible: Boolean) {
-            val lp = itemView.layoutParams
-            lp.height = if (visible) ViewGroup.LayoutParams.WRAP_CONTENT else 0
-            itemView.layoutParams = lp
-            itemView.visibility = if (visible) View.VISIBLE else View.GONE
-        }
-
-        fun bind(slotId: Int) {
-            val cached = nativeAdCache[slotId]
-            if (cached != null && cached.isValid) {
-                setRowVisible(true)
-                cached.render(b)
-                return
-            }
-            nativeAdCache.remove(slotId)?.destroy() // stale/invalidated -> request a fresh one
-            setRowVisible(false)
-            if (slotId in loadingSlots || slotId in failedSlots) return
-            loadingSlots.add(slotId)
-            AdsManager.loadNativeAd(
-                b.root.context,
-                onLoaded = { ad ->
-                    loadingSlots.remove(slotId)
-                    nativeAdCache[slotId] = ad
-                    // The row may have been recycled to another slot while loading.
-                    if (bindingAdapterPosition != RecyclerView.NO_POSITION &&
-                        (items.getOrNull(bindingAdapterPosition) as? HomeRow.NativeAdRow)?.slotId == slotId
-                    ) {
-                        setRowVisible(true)
-                        ad.render(b)
-                    } else {
-                        notifyDataSetChanged() // let whichever holder now shows this slot pick it up
-                    }
-                },
-                onFailed = {
-                    loadingSlots.remove(slotId)
-                    failedSlots.add(slotId) // don't hammer the network retrying a failing placement
-                }
-            )
-        }
-    }
 }

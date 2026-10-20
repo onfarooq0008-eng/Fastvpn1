@@ -18,6 +18,8 @@ class SplitTunnelActivity : AppCompatActivity() {
     private lateinit var binding: ActivitySplitTunnelBinding
     private lateinit var settings: AppSettings
     private lateinit var adapter: AppListAdapter
+    // Read from preferences once; the adapter asks about every visible row on every bind.
+    private val excluded = mutableSetOf<String>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -28,13 +30,17 @@ class SplitTunnelActivity : AppCompatActivity() {
         binding.toolbar.setNavigationOnClickListener { finish() }
 
         settings = AppSettings(this)
+        excluded.addAll(settings.excludedPackages)
         binding.recyclerApps.layoutManager = LinearLayoutManager(this)
         adapter = AppListAdapter(
-            isBypassed = { pkg -> settings.excludedPackages.contains(pkg) },
+            isBypassed = { pkg -> excluded.contains(pkg) },
+            loadIcon = { pkg -> runCatching { packageManager.getApplicationIcon(pkg) }.getOrNull() },
             onToggle = { app, checked ->
-                val current = settings.excludedPackages.toMutableSet()
-                if (checked) current.add(app.packageName) else current.remove(app.packageName)
-                settings.excludedPackages = current
+                if (checked) excluded.add(app.packageName) else excluded.remove(app.packageName)
+                settings.excludedPackages = excluded.toSet()
+                // The app list is baked into the tunnel when it is established, so a connected
+                // tunnel is cycled the next time the main screen is shown (see MainActivity).
+                settings.settingsChangePendingReconnect = true
             }
         )
         binding.recyclerApps.adapter = adapter
@@ -53,8 +59,7 @@ class SplitTunnelActivity : AppCompatActivity() {
                         if (pkg == packageName) return@mapNotNull null // don't list this app itself
                         InstalledApp(
                             packageName = pkg,
-                            label = resolveInfo.loadLabel(pm).toString(),
-                            icon = runCatching { resolveInfo.loadIcon(pm) }.getOrNull()
+                            label = resolveInfo.loadLabel(pm).toString()
                         )
                     }
                     .distinctBy { it.packageName }

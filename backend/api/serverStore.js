@@ -22,8 +22,9 @@ function loadServers() {
 
 function saveServers(servers) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  const tmpPath = `${SERVERS_PATH}.tmp`;
-  fs.writeFileSync(tmpPath, JSON.stringify(servers, null, 2));
+  const tmpPath = `${SERVERS_PATH}.${process.pid}.tmp`;
+  // Contains every VPS agent API key: readable by the owner only.
+  fs.writeFileSync(tmpPath, JSON.stringify(servers, null, 2), { mode: 0o600 });
   fs.renameSync(tmpPath, SERVERS_PATH); // atomic on the same filesystem
 }
 

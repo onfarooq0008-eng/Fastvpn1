@@ -10,6 +10,7 @@ import com.fastvpnn.app.util.SecureKeyStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 
 /**
  * Handles the "Disconnect" button on the persistent connected notification --
@@ -31,6 +32,10 @@ class VpnActionReceiver : BroadcastReceiver() {
     companion object {
         const val ACTION_DISCONNECT = "com.fastvpnn.app.ACTION_DISCONNECT"
         private const val TAG = "FastVPN-Disconnect"
+
+        // A broadcast receiver kept alive with goAsync() must finish within ~10 s or it risks an ANR.
+        // The local teardown is quick; the backend call is best-effort and is retried on next launch.
+        private const val UNREGISTER_TIMEOUT_MS = 6_000L
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -52,12 +57,14 @@ class VpnActionReceiver : BroadcastReceiver() {
                 if (result.isSuccess) {
                     Log.d(TAG, "local tunnel teardown: success")
                     val appContext = context.applicationContext
-                    val keyStore = SecureKeyStore(appContext)
+                    val keyStore = SecureKeyStore.get(appContext)
                     val serverSource = ServerSource(appContext)
                     val active = keyStore.activeRegistration()
                     if (active != null) {
                         try {
-                            serverSource.unregister(keyStore.clientPublicKeyBase64(), active.serverId, active.token)
+                            withTimeout(UNREGISTER_TIMEOUT_MS) {
+                                serverSource.unregister(keyStore.clientPublicKeyBase64(), active.serverId, active.token)
+                            }
                             keyStore.clearActiveRegistration()
                             Log.d(TAG, "backend peer unregistered for server ${active.serverId}")
                         } catch (e: Exception) {

@@ -30,14 +30,24 @@ data class BackendRegistration(
  */
 class BackendApiClient {
 
-    private val client = OkHttpClient.Builder()
-        // Kept short on purpose: the app now re-polls /api/servers every 20s
-        // (see MainActivity.SERVER_REFRESH_INTERVAL_MS), so a slow/unreachable
-        // backend should fail fast and let the next tick try again, rather than
-        // hanging most of that 20s window on one stuck request.
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(8, TimeUnit.SECONDS)
-        .build()
+    private companion object {
+        // ONE client for the whole process: OkHttp pools connections and threads per client, so
+        // creating a new client for every ServerSource()/BackendApiClient() threw that reuse away
+        // (a fresh TLS handshake for every request, plus extra idle thread pools).
+        //
+        // Timeouts are kept short on purpose: the server list re-polls every 30s while the app is
+        // open (see MainActivity.SERVER_REFRESH_INTERVAL_MS), so an unreachable backend should fail
+        // fast and let the next tick try again. callTimeout bounds the whole request (DNS + connect
+        // + TLS + body), which the per-phase timeouts alone do not.
+        val client: OkHttpClient by lazy {
+            OkHttpClient.Builder()
+                .connectTimeout(8, TimeUnit.SECONDS)
+                .readTimeout(8, TimeUnit.SECONDS)
+                .writeTimeout(8, TimeUnit.SECONDS)
+                .callTimeout(15, TimeUnit.SECONDS)
+                .build()
+        }
+    }
 
     suspend fun fetchServers(baseUrl: String): List<Server> = withContext(Dispatchers.IO) {
         val request = Request.Builder().url("${baseUrl.trimEnd('/')}/api/servers").get().build()
@@ -93,6 +103,7 @@ class BackendApiClient {
                 )
             }
         }
+
     suspend fun unregister(baseUrl: String, devicePublicKeyBase64: String, serverId: String, registrationToken: String) =
         withContext(Dispatchers.IO) {
             val json = JSONObject().apply {

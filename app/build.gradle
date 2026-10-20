@@ -21,7 +21,7 @@ android {
         applicationId "com.fastvpnn.app"
         minSdk 24
         targetSdk 36
-        versionCode 6
+        versionCode 5
         versionName "1.0.5"
         vectorDrawables { useSupportLibrary true }
 
@@ -34,8 +34,6 @@ android {
         // billing in the app yet, so they stay hidden. Flip to true once Premium really exists.
         buildConfigField "boolean", "SHOW_PREMIUM", "false"
 
-        // Ad test mode is chosen per build type (see buildTypes below): debug = test ads,
-        // release = real ads. Ad IDs live in ads/AdConfig.kt.
     }
 
     signingConfigs {
@@ -51,7 +49,7 @@ android {
 
     buildTypes {
         release {
-            // REAL ads in the release build you publish. Flip to "true" to ship a release build
+            // REAL Unity ads in the release build you publish. Flip to "true" to ship a release build
             // that still shows only test ads (e.g. for a final QA pass).
             buildConfigField "boolean", "USE_TEST_ADS", "false"
             minifyEnabled true
@@ -69,7 +67,7 @@ android {
             }
         }
         debug {
-            // Debug builds ALWAYS use test ads / test mode.
+            // Debug builds ALWAYS use Unity test mode.
             buildConfigField "boolean", "USE_TEST_ADS", "true"
         }
     }
@@ -110,10 +108,7 @@ dependencies {
     // Official WireGuard userspace backend for Android
     implementation 'com.wireguard.android:tunnel:1.0.20260102'
 
-    // Ads
-    // Meta Audience Network (banner, interstitial, rewarded, native, native banner). 6.21+ is required by Meta.
-    implementation 'com.facebook.android:audience-network-sdk:6.22.0'
-    // Unity Ads (banner, interstitial, rewarded). No native format exists in Unity Ads.
+    // Ads: Unity Ads (the only ad network) -- one banner. 4.20+ ships its own R8 rules for AGP 9.
     implementation 'com.unity3d.ads:unity-ads:4.21.0'
 
     // Networking (backend API + ping)
@@ -123,5 +118,4 @@ dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0'
 
     testImplementation 'junit:junit:4.13.2'
-    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
 }

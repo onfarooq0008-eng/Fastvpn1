@@ -16,6 +16,7 @@ const express = require('express');
 const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const CONFIG_PATH = path.join(__dirname, 'agent.config.json');
 if (!fs.existsSync(CONFIG_PATH)) {
@@ -39,9 +40,32 @@ function isValidIp(ip) {
   return ip.split('.').every((octet) => Number(octet) >= 0 && Number(octet) <= 255);
 }
 
+// Constant-time comparison so the key can't be guessed byte by byte from response timing.
+function keysEqual(provided, expected) {
+  if (typeof provided !== 'string' || typeof expected !== 'string') return false;
+  const a = Buffer.from(provided, 'utf8');
+  const b = Buffer.from(expected, 'utf8');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+// Every wg/wg-quick call is bounded, so a wedged binary can't leave a request hanging forever.
+const WG_TIMEOUT_MS = 10_000;
+const wgExec = (args, cb) => execFile('wg', args, { timeout: WG_TIMEOUT_MS }, cb);
+const wgQuickSave = (cb) => execFile('wg-quick', ['save', config.wgInterface], { timeout: WG_TIMEOUT_MS }, cb);
+
+// `wg-quick save` rewrites the whole config file, so two peer changes running at the same moment
+// (several people connecting at once) could clobber each other's save. Peer changes therefore run
+// strictly one after another; reads (/health) are unaffected.
+let peerChangeQueue = Promise.resolve();
+function serialized(task) {
+  const run = peerChangeQueue.then(task);
+  peerChangeQueue = run.catch(() => {});
+  return run;
+}
+
 function requireApiKey(req, res, next) {
   const key = req.header('X-Api-Key');
-  if (key !== config.apiKey) {
+  if (!keysEqual(key, config.apiKey)) {
     return res.status(401).json({ error: 'invalid or missing X-Api-Key' });
   }
   next();
@@ -55,12 +79,12 @@ function requireApiKey(req, res, next) {
 const ACTIVE_HANDSHAKE_WINDOW_SECONDS = 180;
 
 app.get('/health', requireApiKey, (req, res) => {
-  execFile('wg', ['show', config.wgInterface, 'peers'], (err, stdout) => {
+  wgExec(['show', config.wgInterface, 'peers'], (err, stdout) => {
     if (err) {
       return res.json({ ok: false, peerCount: -1, activePeerCount: -1 });
     }
     const peerCount = stdout.trim().split('\n').filter(Boolean).length;
-    execFile('wg', ['show', config.wgInterface, 'latest-handshakes'], (hsErr, hsStdout) => {
+    wgExec(['show', config.wgInterface, 'latest-handshakes'], (hsErr, hsStdout) => {
       if (hsErr) {
         // Older wg-tools or a transient error -- still report peerCount.
         return res.json({ ok: true, peerCount, activePeerCount: -1, handshakes: {} });
@@ -88,7 +112,25 @@ app.get('/health', requireApiKey, (req, res) => {
   });
 });
 
-app.post('/add-peer', requireApiKey, (req, res) => {
+/** Runs one `wg set` + `wg-quick save` pair as a single queued step. Resolves to null on success or an error body. */
+function changePeer(setArgs, { rollbackArgs, failedMessage, notPersistedMessage }) {
+  return serialized(() => new Promise((resolve) => {
+    wgExec(setArgs, (err, _stdout, stderr) => {
+      if (err) {
+        console.error('wg set failed:', stderr || err.message);
+        return resolve({ error: failedMessage, detail: stderr || err.message });
+      }
+      wgQuickSave((saveErr, _saveStdout, saveStderr) => {
+        if (!saveErr) return resolve(null);
+        console.error('wg-quick save failed:', saveStderr || saveErr.message);
+        if (rollbackArgs) wgExec(rollbackArgs, () => resolve({ error: notPersistedMessage }));
+        else resolve({ error: notPersistedMessage });
+      });
+    });
+  }));
+}
+
+app.post('/add-peer', requireApiKey, async (req, res) => {
   const { publicKey, allowedIp } = req.body || {};
   if (!isValidPublicKey(publicKey)) {
     return res.status(400).json({ error: 'invalid publicKey' });
@@ -96,41 +138,32 @@ app.post('/add-peer', requireApiKey, (req, res) => {
   if (!isValidIp(allowedIp)) {
     return res.status(400).json({ error: 'invalid allowedIp' });
   }
-
-  const allowedIpCidr = `${allowedIp}/32`;
-  execFile('wg', ['set', config.wgInterface, 'peer', publicKey, 'allowed-ips', allowedIpCidr], (err, _stdout, stderr) => {
-    if (err) {
-      console.error('wg set failed:', stderr || err.message);
-      return res.status(500).json({ error: 'failed to add peer', detail: stderr || err.message });
+  const failure = await changePeer(
+    ['set', config.wgInterface, 'peer', publicKey, 'allowed-ips', `${allowedIp}/32`],
+    {
+      rollbackArgs: ['set', config.wgInterface, 'peer', publicKey, 'remove'],
+      failedMessage: 'failed to add peer',
+      notPersistedMessage: 'peer was added live but could not be persisted',
     }
-    execFile('wg-quick', ['save', config.wgInterface], (saveErr, _saveStdout, saveStderr) => {
-      if (saveErr) {
-        console.error('wg-quick save failed:', saveStderr || saveErr.message);
-        execFile('wg', ['set', config.wgInterface, 'peer', publicKey, 'remove'], () => {});
-        return res.status(500).json({ error: 'peer was added live but could not be persisted' });
-      }
-      res.json({ ok: true });
-    });
-  });
+  );
+  if (failure) return res.status(500).json(failure);
+  res.json({ ok: true });
 });
 
-app.post('/remove-peer', requireApiKey, (req, res) => {
+app.post('/remove-peer', requireApiKey, async (req, res) => {
   const { publicKey } = req.body || {};
   if (!isValidPublicKey(publicKey)) {
     return res.status(400).json({ error: 'invalid publicKey' });
   }
-  execFile('wg', ['set', config.wgInterface, 'peer', publicKey, 'remove'], (err, _stdout, stderr) => {
-    if (err) {
-      return res.status(500).json({ error: 'failed to remove peer', detail: stderr || err.message });
+  const failure = await changePeer(
+    ['set', config.wgInterface, 'peer', publicKey, 'remove'],
+    {
+      failedMessage: 'failed to remove peer',
+      notPersistedMessage: 'peer removed live but configuration could not be persisted',
     }
-    execFile('wg-quick', ['save', config.wgInterface], (saveErr, _saveStdout, saveStderr) => {
-      if (saveErr) {
-        console.error('wg-quick save after remove failed:', saveStderr || saveErr.message);
-        return res.status(500).json({ error: 'peer removed live but configuration could not be persisted' });
-      }
-      res.json({ ok: true });
-    });
-  });
+  );
+  if (failure) return res.status(500).json(failure);
+  res.json({ ok: true });
 });
 
 // Safety net: guarantees no raw Node stack trace is ever returned to a

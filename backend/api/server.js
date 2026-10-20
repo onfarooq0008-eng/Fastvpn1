@@ -20,6 +20,8 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 // against both a genuine capacity problem and a malicious client trying to
 // register unlimited fake devices to exhaust the address pool.
 const MAX_REGISTRATIONS_PER_SERVER = 200;
+// Must stay well below RESERVATION_TTL_MS (store.js, default 2 min) so a reservation outlives its agent call.
+const AGENT_ADD_PEER_TIMEOUT_MS = 15_000;
 
 // A device that force-kills the app, uninstalls, or has its process killed by
 // the OS before a normal disconnect never calls /api/unregister -- its
@@ -49,12 +51,23 @@ function loadOrCreateAdminConfig() {
     return JSON.parse(fs.readFileSync(ADMIN_CONFIG_PATH, 'utf8'));
   }
   const config = { adminKey: crypto.randomBytes(24).toString('hex') };
-  fs.writeFileSync(ADMIN_CONFIG_PATH, JSON.stringify(config, null, 2));
+  fs.writeFileSync(ADMIN_CONFIG_PATH, JSON.stringify(config, null, 2), { mode: 0o600 }); // holds the admin key: owner-only
   return config;
 }
 const adminConfig = loadOrCreateAdminConfig();
 
 const HOST_RE = /^[a-zA-Z0-9.:-]+$/;
+
+/** POSTs to a VPS agent. Always bounded by a timeout so one hung agent can never hold a request,
+ *  an address reservation or a background sweep open forever. */
+function agentPost(server, route, payload) {
+  return fetch(`${server.agentUrl}${route}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Api-Key': server.agentApiKey },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(AGENT_ADD_PEER_TIMEOUT_MS),
+  });
+}
 
 function isValidPublicKey(key) {
   if (typeof key !== 'string') return false;
@@ -143,7 +156,7 @@ app.get('/adminui', (req, res) => {
 app.get('/dashboard.html', (req, res) => res.redirect(301, '/adminui'));
 
 function requireAdminKey(req, res, next) {
-  if (req.header('X-Admin-Key') !== adminConfig.adminKey) {
+  if (!tokensEqual(req.header('X-Admin-Key'), adminConfig.adminKey)) {
     return res.status(401).json({ error: 'invalid or missing X-Admin-Key' });
   }
   next();
@@ -152,7 +165,7 @@ function requireAdminKey(req, res, next) {
 // Accepts the long-lived X-Admin-Key (used by setup.sh, machine to machine --
 // no browser involved -- and also by the dashboard's login form).
 async function requireAdminAccess(req, res, next) {
-  if (req.header('X-Admin-Key') === adminConfig.adminKey) return next();
+  if (tokensEqual(req.header('X-Admin-Key'), adminConfig.adminKey)) return next();
   return res.status(401).json({ error: 'invalid or missing admin credentials' });
 }
 
@@ -514,11 +527,7 @@ app.post('/api/register', rateLimit(20, 60_000), async (req, res) => {
   const registrationToken = reservation.token;
 
   try {
-    const agentResp = await fetch(`${server.agentUrl}/add-peer`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Api-Key': server.agentApiKey },
-      body: JSON.stringify({ publicKey: devicePublicKey, allowedIp: assignedAddress }),
-    });
+    const agentResp = await agentPost(server, '/add-peer', { publicKey: devicePublicKey, allowedIp: assignedAddress });
     if (!agentResp.ok) {
       const detail = await agentResp.text();
       throw new Error(`agent responded ${agentResp.status}: ${detail}`);
@@ -533,7 +542,22 @@ app.post('/api/register', rateLimit(20, 60_000), async (req, res) => {
     return res.status(502).json({ error: 'failed to register with VPS agent', detail: err.message });
   }
 
-  await store.saveRegistration(devicePublicKey, server.id, assignedAddress, registrationToken);
+  try {
+    await store.saveRegistration(devicePublicKey, server.id, assignedAddress, registrationToken);
+  } catch (err) {
+    // The reservation expired and the address went to another device (or the
+    // write failed). Never hand this address out: take the peer back off the
+    // VPS so it cannot shadow the new owner, and let the app retry.
+    console.error(`Failed to save registration on ${server.id}:`, err.message);
+    if (err.code === 'RESERVATION_LOST') {
+      try {
+        await agentPost(server, '/remove-peer', { publicKey: devicePublicKey });
+      } catch (cleanupErr) {
+        console.error(`  also failed to remove the orphaned peer on ${server.id}:`, cleanupErr.message);
+      }
+    }
+    return res.status(503).json({ error: 'registration could not be completed, please retry' });
+  }
   res.json(buildResponse(server, assignedAddress, true, registrationToken));
 });
 
@@ -550,11 +574,7 @@ app.post('/api/unregister', rateLimit(20, 60_000), async (req, res) => {
   const server = serverStore.loadServers().find((s) => s.id === serverId);
   if (!server) return res.status(404).json({ error: 'server not found' });
   try {
-    const agentResp = await fetch(`${server.agentUrl}/remove-peer`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Api-Key': server.agentApiKey },
-      body: JSON.stringify({ publicKey: devicePublicKey }),
-    });
+    const agentResp = await agentPost(server, '/remove-peer', { publicKey: devicePublicKey });
     if (!agentResp.ok) {
       const detail = await agentResp.text();
       throw new Error(`agent responded ${agentResp.status}: ${detail}`);
@@ -604,80 +624,56 @@ const PORT = process.env.PORT || 8080;
 // from the internet.
 const HOST = process.env.HOST || '0.0.0.0';
 
-// Reclaims registration slots from devices that never called /api/unregister --
-// e.g. the app's process was killed before it could deregister (see
-// MANUAL_TESTING.md). Actually removes the peer from the VPS agent first, not
-// just the local bookkeeping, so a re-used IP never ends up assigned to two
-// peers at once. One unreachable/misbehaving VPS logs an error and does not
-// stop the sweep from pruning stale registrations on other servers.
-async function pruneStaleRegistrations() {
-  const stale = store.findStaleRegistrations(STALE_REGISTRATION_MAX_AGE_MS);
-  if (stale.length === 0) return;
-  console.log(`Pruning ${stale.length} stale registration(s) (unseen for 30+ days)...`);
+// Reclaims registration slots that are no longer in use. Always removes the peer from the VPS agent
+// FIRST, and only then drops the local row, so a re-used IP can never end up assigned to two peers.
+// One unreachable/misbehaving VPS logs an error and does not stop the sweep from pruning the others.
+async function pruneRegistrations(registrations, label) {
+  if (registrations.length === 0) return;
+  console.log(`Pruning ${registrations.length} ${label} registration(s)...`);
   const servers = serverStore.loadServers();
-  for (const reg of stale) {
-    const server = servers.find((s) => s.id === reg.serverId);
-    if (!server) {
-      // Server itself no longer exists -- nothing to tell an agent, just drop the row.
-      await store.removeRegistrationByKey(reg.devicePublicKey, reg.serverId);
-      continue;
-    }
+  for (const reg of registrations) {
     try {
-      const agentResp = await fetch(`${server.agentUrl}/remove-peer`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Api-Key': server.agentApiKey },
-        body: JSON.stringify({ publicKey: reg.devicePublicKey }),
-      });
-      if (!agentResp.ok && agentResp.status !== 404) {
-        throw new Error(`agent responded ${agentResp.status}`);
-      }
+      const server = servers.find((s) => s.id === reg.serverId);
+      if (server) {
+        const agentResp = await agentPost(server, '/remove-peer', { publicKey: reg.devicePublicKey });
+        if (!agentResp.ok && agentResp.status !== 404) throw new Error(`agent responded ${agentResp.status}`);
+      } // else: the server itself no longer exists -- nothing to tell an agent, just drop the row
       await store.removeRegistrationByKey(reg.devicePublicKey, reg.serverId);
-      console.log(`  pruned stale registration on ${reg.serverId}`);
+      console.log(`  pruned ${label} registration on ${reg.serverId}`);
     } catch (err) {
-      // Leave this one for the next sweep rather than dropping the row while
-      // the real peer might still exist on an unreachable VPS.
-      console.error(`  failed to prune stale registration on ${reg.serverId}:`, err.message);
+      // Leave it for the next sweep rather than dropping the row while the real peer might still
+      // exist on an unreachable VPS.
+      console.error(`  failed to prune ${label} registration on ${reg.serverId}:`, err.message);
     }
   }
 }
 
-// Reclaims registration slots from devices that registered (got an IP + a
-// WireGuard peer added) but never actually completed a handshake -- e.g. the
-// app crashed mid-connect, or the generated config was never used. These are
-// "stuck pending" rather than "genuinely abandoned after real use", so they
-// get pruned within roughly PENDING_REGISTRATION_MAX_AGE_MS instead of
-// waiting the full 30 days that pruneStaleRegistrations allows for a device
-// that actually connected at some point. Same remove-peer-first safety as
-// pruneStaleRegistrations below.
-async function prunePendingRegistrations() {
-  const pending = store.findPendingRegistrations(PENDING_REGISTRATION_MAX_AGE_MS);
-  if (pending.length === 0) return;
-  console.log(`Pruning ${pending.length} stuck/pending registration(s) (never connected, 1h+ old)...`);
-  const servers = serverStore.loadServers();
-  for (const reg of pending) {
-    const server = servers.find((s) => s.id === reg.serverId);
-    if (!server) {
-      await store.removeRegistrationByKey(reg.devicePublicKey, reg.serverId);
-      continue;
-    }
+// Never run the same sweep twice at once (a slow agent could otherwise stack up overlapping runs),
+// and never let a failure escape as an unhandled rejection -- on Node 22 that would crash the API.
+function guardedSweep(name, fn) {
+  let running = false;
+  return async () => {
+    if (running) return;
+    running = true;
     try {
-      const agentResp = await fetch(`${server.agentUrl}/remove-peer`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Api-Key': server.agentApiKey },
-        body: JSON.stringify({ publicKey: reg.devicePublicKey }),
-      });
-      if (!agentResp.ok && agentResp.status !== 404) {
-        throw new Error(`agent responded ${agentResp.status}`);
-      }
-      await store.removeRegistrationByKey(reg.devicePublicKey, reg.serverId);
-      console.log(`  pruned stuck/pending registration on ${reg.serverId}`);
+      await fn();
     } catch (err) {
-      // Leave it for the next sweep rather than dropping the row while the
-      // real peer might still exist on an unreachable VPS.
-      console.error(`  failed to prune pending registration on ${reg.serverId}:`, err.message);
+      console.error(`${name} sweep failed:`, err.message);
+    } finally {
+      running = false;
     }
-  }
+  };
 }
+
+// Devices that force-kill the app, uninstall, or are killed by the OS never call /api/unregister.
+// Registrations unseen for 30+ days are genuinely abandoned (see STALE_REGISTRATION_MAX_AGE_MS).
+const pruneStaleRegistrations = guardedSweep('stale-registration', () =>
+  pruneRegistrations(store.findStaleRegistrations(STALE_REGISTRATION_MAX_AGE_MS), 'stale (unseen 30+ days)'));
+
+// Registrations that got an IP + WireGuard peer but never completed a handshake ("stuck pending")
+// are pruned within roughly PENDING_REGISTRATION_MAX_AGE_MS instead of waiting the full 30 days.
+const prunePendingRegistrations = guardedSweep('pending-registration', () =>
+  pruneRegistrations(store.findPendingRegistrations(PENDING_REGISTRATION_MAX_AGE_MS), 'stuck/pending (never connected, 1h+ old)'));
 
 app.listen(PORT, HOST, () => {
   console.log(`FastVPN control API listening on ${HOST}:${PORT}`);

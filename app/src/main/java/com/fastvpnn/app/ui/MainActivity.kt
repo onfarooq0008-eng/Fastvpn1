@@ -28,6 +28,7 @@ import com.fastvpnn.app.data.Server
 import com.fastvpnn.app.data.ServerCache
 import com.fastvpnn.app.data.ServerSource
 import com.fastvpnn.app.databinding.ActivityMainBinding
+import com.fastvpnn.app.util.ConnectivityCheckUtil
 import com.fastvpnn.app.util.NotificationHelper
 import com.fastvpnn.app.util.PingUtil
 import com.fastvpnn.app.util.ThemeUtil
@@ -35,10 +36,18 @@ import com.fastvpnn.app.util.SecureKeyStore
 import com.fastvpnn.app.vpn.TunnelState
 import com.fastvpnn.app.vpn.VpnTunnelManager
 import com.fastvpnn.app.vpn.VpnTunnelManagerHolder
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.util.Locale
 import com.fastvpnn.app.util.applyEdgeToEdgeInsets
 
@@ -54,7 +63,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var serverSource: ServerSource
     private lateinit var appSettings: AppSettings
-    private lateinit var keyStore: SecureKeyStore
+    // Opening the encrypted key store is slow, so it is created lazily and only ever used from IO threads.
+    private val keyStore by lazy { SecureKeyStore.get(applicationContext) }
     private lateinit var tunnelManager: VpnTunnelManager
     private lateinit var adapter: HomeListAdapter
 
@@ -66,6 +76,11 @@ class MainActivity : AppCompatActivity() {
     private var statsJob: Job? = null
     private var refreshJob: Job? = null
     private var connectionFlowActive = false
+    // True while the tunnel is being torn down by the power button; makes rapid taps harmless.
+    private var disconnectInProgress = false
+    // Only one server refresh at a time, and never two within one interval (see startServerAutoRefresh).
+    private val refreshMutex = Mutex()
+    private var lastRefreshStartedAt = 0L
     private var connectingServer: Server? = null
 
     private enum class Tab { HOME, LOCATIONS }
@@ -102,8 +117,9 @@ class MainActivity : AppCompatActivity() {
 
         serverSource = ServerSource(this)
         appSettings = AppSettings(this)
-        keyStore = SecureKeyStore(this)
         tunnelManager = VpnTunnelManagerHolder.get(this)
+        // Warm the key store in the background so the first Connect tap doesn't pay for it.
+        lifecycleScope.launch(Dispatchers.IO) { runCatching { keyStore } }
 
         binding.recyclerServers.layoutManager = LinearLayoutManager(this)
         (binding.recyclerServers.itemAnimator as? SimpleItemAnimator)?.supportsChangeAnimations = false
@@ -150,15 +166,12 @@ class MainActivity : AppCompatActivity() {
         )
 
         requestNotificationPermissionIfNeeded()
-        // Idempotent. Needed for first-run users: FastVpnApp only inits for returning users, and
-        // outside the EEA/UK/CH no dialog runs, so nothing else would start the ad SDKs.
+
+        // Idempotent: first-run users reach here without FastVpnApp having started ads yet.
         AdsManager.init(application)
         AdsManager.showBanner(this, binding.adContainer)
-        AdsManager.showNativeBanner(this, binding.nativeBannerHome)
         // Ads are required to use the app: ask until the user allows them (also after rotation / process restart).
-        if (AdsConsent.needsPrompt(this)) {
-            AdsConsent.showDialog(this)
-        }
+        if (AdsConsent.needsPrompt(this)) AdsConsent.showDialog(this)
 
         // Pick up the fetch SplashActivity already started while its logo was
         // showing, so this first load doesn't start the network call from zero.
@@ -168,7 +181,8 @@ class MainActivity : AppCompatActivity() {
                 // auto-connect. This prevents an Activity-startup race from launching
                 // a second connection while an existing tunnel is already active.
                 tunnelManager.syncStateFromBackend()
-                if (tunnelManager.state == TunnelState.DOWN) {
+                // Not while a connect is in flight: its brand-new lease would be released under it.
+                if (tunnelManager.state == TunnelState.DOWN && !connectionFlowActive) {
                     cleanupStaleRegistrationLeases()
                 }
                 restoreConnectedServerFromSettings()
@@ -276,9 +290,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        adapter.destroyAds()
         AdsManager.hideBanner(binding.adContainer)
-        AdsManager.hideNativeBanner(binding.nativeBannerHome)
     }
 
     override fun onPause() {
@@ -296,9 +308,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Have an interstitial ready before the user taps Connect (no-op if one is already loaded/loading).
-        if (tunnelManager.state != TunnelState.UP) AdsManager.preloadInterstitial()
-
         // The backend tunnel state is authoritative for FastVPN. Android's generic
         // VPN transport flag is useful as a secondary signal, but it cannot tell us
         // which VPN belongs to this app. Most importantly, never let a missing
@@ -326,48 +335,62 @@ class MainActivity : AppCompatActivity() {
         startServerAutoRefresh()
     }
 
-    /** Settings -> DNS is applied on the WireGuard interface at connect time, so
-     *  changing it while already connected has no effect on the running tunnel
-     *  until the connection is cycled -- see AppSettings.dnsChangePendingReconnect.
-     *  Runs a real reconnect (fresh registration + tunnel, same as switching
-     *  servers) rather than just toggling the flag, so the new resolver is
-     *  actually live afterward instead of only "will apply next time". */
+    /** DNS and the split-tunnel app list are applied on the WireGuard interface at connect time, so
+     *  changing them while already connected has no effect on the running tunnel until the
+     *  connection is cycled -- see AppSettings.settingsChangePendingReconnect.
+     *  Runs a real reconnect (fresh registration + tunnel, same as switching servers) rather than
+     *  just toggling the flag, so the new setting is actually live afterward. */
     private fun reconnectIfDnsSettingChanged() {
-        if (!appSettings.dnsChangePendingReconnect) return
-        appSettings.dnsChangePendingReconnect = false
+        if (!appSettings.settingsChangePendingReconnect) return
         val server = connectedServer ?: return
-        if (connectionFlowActive) return
-        android.widget.Toast.makeText(this, "Reconnecting to apply your new DNS setting…", android.widget.Toast.LENGTH_SHORT).show()
+        if (connectionFlowActive || disconnectInProgress) return
+        appSettings.settingsChangePendingReconnect = false
+        Toast.makeText(this, "Reconnecting to apply your new settings…", Toast.LENGTH_SHORT).show()
+        connectionFlowActive = true
+        updateStatusCard()
+        updateActionButton()
         lifecycleScope.launch {
-            val result = tunnelManager.disconnect()
-            if (result.isFailure) {
-                tunnelManager.syncStateFromBackend()
+            if (!disconnectTunnel("Could not reconnect to apply settings")) {
+                connectionFlowActive = false
                 updateStatusCard()
                 updateActionButton()
-                android.widget.Toast.makeText(
-                    this@MainActivity,
-                    "Could not reconnect to apply DNS: ${result.exceptionOrNull()?.message ?: "disconnect failed"}",
-                    android.widget.Toast.LENGTH_LONG
-                ).show()
                 return@launch
             }
-            releaseActiveRegistrationLease()
-            onDisconnected()
-            connectionFlowActive = true
             beginConnection(buildFailoverChain(server))
         }
     }
 
+    /** Tears the tunnel down and updates the UI. On failure it shows [failureMessage], re-reads the
+     *  real tunnel state so the button never lies, and returns false. */
+    private suspend fun disconnectTunnel(failureMessage: String): Boolean {
+        val result = tunnelManager.disconnect()
+        if (result.isFailure) {
+            tunnelManager.syncStateFromBackend()
+            updateStatusCard()
+            updateActionButton()
+            Toast.makeText(
+                this, "$failureMessage: ${result.exceptionOrNull()?.message ?: "unknown error"}", Toast.LENGTH_LONG
+            ).show()
+            return false
+        }
+        onDisconnected() // UI first -- releasing the backend lease below can take a network round trip
+        releaseActiveRegistrationLease()
+        return true
+    }
+
     /** Keeps the server list (and its ping times) current the whole time the app is
-     *  in the foreground, instead of only refreshing once on open. Fires immediately,
-     *  then every [SERVER_REFRESH_INTERVAL_MS] after that; onPause() cancels this job
-     *  so it never keeps polling while backgrounded. */
+     *  in the foreground, instead of only refreshing once on open. Waits until
+     *  [SERVER_REFRESH_INTERVAL_MS] has passed since the LAST refresh started (so coming back from
+     *  Settings or the initial load never causes a duplicate request), then repeats; onPause()
+     *  cancels this job so it never keeps polling while backgrounded. */
     private fun startServerAutoRefresh() {
         refreshJob?.cancel()
         refreshJob = lifecycleScope.launch {
             while (true) {
+                val wait = lastRefreshStartedAt + SERVER_REFRESH_INTERVAL_MS - SystemClock.elapsedRealtime()
+                if (wait > 0) delay(wait)
                 refreshServers(showSpinner = false)
-                delay(SERVER_REFRESH_INTERVAL_MS)
+                delay(1_000) // never a tight loop, even if a refresh was skipped
             }
         }
     }
@@ -397,28 +420,41 @@ class MainActivity : AppCompatActivity() {
      *  toast: on for the visible pull-to-refresh/initial load, off for the silent
      *  background tick so a flaky connection doesn't nag the user every 20 seconds. */
     private suspend fun refreshServers(showSpinner: Boolean, warmPrefetch: Deferred<List<Server>>? = null) {
+        // A silent background tick simply skips if a refresh is already running; a user-initiated
+        // one (initial load / pull-to-refresh) waits its turn so the spinner always resolves.
+        if (!showSpinner && refreshMutex.isLocked) return
         if (showSpinner) binding.swipeRefresh.isRefreshing = true
         try {
-            // If Splash already started (or finished) fetching, await that instead
-            // of firing a second, redundant network call.
-            val servers = warmPrefetch?.await() ?: serverSource.getServers()
-            // Carry over ping times we already measured so already-known servers
-            // don't flash back to "Checking..." on every refresh.
-            servers.forEach { s -> allServers.find { it.id == s.id }?.let { s.pingMs = it.pingMs } }
-            allServers = servers
-            renderRows()
-            val targets = servers.map { Triple(it.id, it.endpointHost, 22) }
-            val results = PingUtil.pingAll(targets)
-            servers.forEach { it.pingMs = results[it.id] ?: -2 }
-            allServers = servers
-            renderRows()
+            refreshMutex.withLock {
+                lastRefreshStartedAt = SystemClock.elapsedRealtime()
+                // If Splash already started (or finished) fetching, await that instead of firing a
+                // second, redundant network call -- but if that prefetch failed, fetch again now
+                // rather than leaving the first screen empty until the next tick.
+                val prefetched = try {
+                    warmPrefetch?.await()
+                } catch (e: CancellationException) {
+                    currentCoroutineContext().ensureActive() // our own cancellation -> propagate
+                    null
+                } catch (e: Exception) {
+                    null
+                }
+                val servers = prefetched ?: serverSource.getServers()
+                // Carry over ping times we already measured so already-known servers
+                // don't flash back to "Checking..." on every refresh.
+                val knownPings = allServers.associate { it.id to it.pingMs }
+                servers.forEach { s -> knownPings[s.id]?.let { s.pingMs = it } }
+                allServers = servers
+                renderRows()
+                val targets = servers.map { Triple(it.id, it.endpointHost, 22) }
+                val results = PingUtil.pingAll(targets)
+                servers.forEach { it.pingMs = results[it.id] ?: -2 }
+                renderRows()
+            }
+        } catch (e: CancellationException) {
+            throw e // the screen went away -- not an error, and no Toast on a dead Activity
         } catch (e: Exception) {
             if (showSpinner) {
-                android.widget.Toast.makeText(
-                    this@MainActivity,
-                    "Couldn't refresh servers -- showing your last list.",
-                    android.widget.Toast.LENGTH_SHORT
-                ).show()
+                Toast.makeText(this, "Couldn't refresh servers -- showing your last list.", Toast.LENGTH_SHORT).show()
             }
         } finally {
             if (showSpinner) binding.swipeRefresh.isRefreshing = false
@@ -456,17 +492,11 @@ class MainActivity : AppCompatActivity() {
         val rows = mutableListOf<HomeRow>()
         // The "Fastest Server" option sits at the very top of the full list.
         if (locationFilter == LocationFilter.ALL && query.isEmpty() && groups.isNotEmpty()) rows.add(HomeRow.FastestRow)
-        var nativeAdSlot = 0
-        groups.forEachIndexed { index, group ->
+        groups.forEach { group ->
             val expanded = expandedCountryCodes.contains(group.countryCode)
             rows.add(HomeRow.Header(group, expanded))
             if (expanded) {
                 group.servers.forEach { rows.add(HomeRow.ServerRow(it)) }
-            }
-            // One native ad every 4 country rows -- frequent enough to monetize a long
-            // server list, spaced out enough to not feel like it's crowding real results.
-            if ((index + 1) % 4 == 0 && index != groups.lastIndex) {
-                rows.add(HomeRow.NativeAdRow(nativeAdSlot++))
             }
         }
         adapter.submit(rows, connectedId, favorites, appSettings.fastestServerMode)
@@ -508,8 +538,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun onActionButtonTapped() {
+        if (disconnectInProgress) return
         if (tunnelManager.state == TunnelState.UP) {
-            // VPN is connected: never show an interstitial here, just disconnect.
             disconnectFromHome()
         } else {
             connectToPreferred()
@@ -517,30 +547,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun disconnectFromHome() {
-        run {
-            // Do not require connectedServer here. That field belongs to the Activity
-            // and is lost when the Activity is recreated, while the WireGuard tunnel
-            // can still be running. The notification can disconnect successfully in
-            // exactly this situation, so the home button must do the same.
-            lifecycleScope.launch {
-                val result = tunnelManager.disconnect()
-                result.onSuccess {
-                    releaseActiveRegistrationLease()
-                    onDisconnected()
-                    // VPN is now off: load + show an interstitial.
-                    AdsManager.showDisconnectInterstitial(this@MainActivity)
-                }.onFailure {
-                    android.widget.Toast.makeText(
-                        this@MainActivity,
-                        "Could not disconnect VPN: ${it.message ?: "unknown error"}",
-                        android.widget.Toast.LENGTH_LONG
-                    ).show()
-                    // Re-read the manager state so the button never lies about the
-                    // actual tunnel state after a failed disconnect attempt.
-                    tunnelManager.syncStateFromBackend()
-                    updateStatusCard()
-                    updateActionButton()
-                }
+        if (disconnectInProgress || connectionFlowActive) return
+        // Do not require connectedServer here. That field belongs to the Activity and is lost when
+        // the Activity is recreated, while the WireGuard tunnel can still be running. The
+        // notification can disconnect successfully in exactly this situation, so the home button
+        // must do the same.
+        disconnectInProgress = true
+        updateActionButton()
+        lifecycleScope.launch {
+            try {
+                disconnectTunnel("Could not disconnect VPN")
+            } finally {
+                disconnectInProgress = false
+                updateActionButton()
             }
         }
     }
@@ -582,45 +601,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun onServerTapped(server: Server) {
-        if (tunnelManager.state == TunnelState.CONNECTING || connectionFlowActive) return
+        if (tunnelManager.state == TunnelState.CONNECTING || connectionFlowActive || disconnectInProgress) return
         if (tunnelManager.state == TunnelState.UP) {
             if (connectedServer?.id == server.id) {
-                lifecycleScope.launch {
-                    val result = tunnelManager.disconnect()
-                    if (result.isSuccess) {
-                        releaseActiveRegistrationLease()
-                        onDisconnected()
-                        AdsManager.showDisconnectInterstitial(this@MainActivity)
-                    } else {
-                        tunnelManager.syncStateFromBackend()
-                        updateStatusCard()
-                        updateActionButton()
-                        android.widget.Toast.makeText(
-                            this@MainActivity,
-                            "Could not disconnect VPN: ${result.exceptionOrNull()?.message ?: "unknown error"}",
-                            android.widget.Toast.LENGTH_LONG
-                        ).show()
-                    }
-                }
+                // Tapping the server you're already on disconnects.
+                disconnectFromHome()
             } else {
+                // Switching servers. Claim the flow BEFORE the first suspension so a second tap
+                // while the old tunnel is still coming down can't start a parallel connect.
+                connectionFlowActive = true
+                updateStatusCard()
+                updateActionButton()
                 lifecycleScope.launch {
-                    val result = tunnelManager.disconnect()
-                    if (result.isFailure) {
-                        tunnelManager.syncStateFromBackend()
+                    if (!disconnectTunnel("Could not switch server")) {
+                        connectionFlowActive = false
                         updateStatusCard()
                         updateActionButton()
-                        android.widget.Toast.makeText(
-                            this@MainActivity,
-                            "Could not switch server: ${result.exceptionOrNull()?.message ?: "disconnect failed"}",
-                            android.widget.Toast.LENGTH_LONG
-                        ).show()
                         return@launch
                     }
-                    releaseActiveRegistrationLease()
-                    onDisconnected()
-                    connectionFlowActive = true
-                    // Switching servers while already connected: no interstitial.
-                    beginConnection(buildFailoverChain(server), showAd = false)
+                    beginConnection(buildFailoverChain(server))
                 }
             }
             return
@@ -644,31 +643,25 @@ class MainActivity : AppCompatActivity() {
     /** Attempts chain[attemptIndex]; on failure (interface never came up, OR it came
      *  up but couldn't actually reach the internet -- see ConnectivityCheckUtil),
      *  automatically tries the next candidate instead of just failing outright. */
-    private fun beginConnection(chain: List<Server>, attemptIndex: Int = 0, showAd: Boolean = true) {
+    private fun beginConnection(chain: List<Server>, attemptIndex: Int = 0) {
         if (attemptIndex >= chain.size) {
             connectionFlowActive = false
             pendingChain = null
             connectedServer = null
             updateStatusCard()
             updateActionButton()
-            android.widget.Toast.makeText(
+            Toast.makeText(
                 this,
                 "Couldn't establish a working connection through any nearby server. Check your internet connection or try again shortly.",
-                android.widget.Toast.LENGTH_LONG
+                Toast.LENGTH_LONG
             ).show()
             return
         }
         if (attemptIndex == 0) {
-            if (showAd) {
-                // Fresh connect (VPN currently off): if an interstitial is already loaded, show it first, then
-                // connect. If none is ready, the connection starts immediately -- it never waits for an ad.
-                AdsManager.showConnectInterstitial(this) { doConnect(chain, attemptIndex) }
-            } else {
-                doConnect(chain, attemptIndex)
-            }
+            doConnect(chain, attemptIndex)
         } else {
-            android.widget.Toast.makeText(
-                this, "${chain[attemptIndex - 1].name} didn't work, trying another server…", android.widget.Toast.LENGTH_SHORT
+            Toast.makeText(
+                this, "${chain[attemptIndex - 1].name} didn't work, trying another server…", Toast.LENGTH_SHORT
             ).show()
             doConnect(chain, attemptIndex)
         }
@@ -685,10 +678,10 @@ class MainActivity : AppCompatActivity() {
     )
 
     private suspend fun registerWithServer(server: Server): Registration {
-        val publicKey = keyStore.clientPublicKeyBase64()
+        val publicKey = withContext(Dispatchers.IO) { keyStore.clientPublicKeyBase64() }
         val reg = serverSource.register(publicKey, preferredServerId = server.id)
         if (reg.registrationToken.isNotBlank()) {
-            keyStore.addPendingRegistration(reg.serverId, reg.registrationToken)
+            withContext(Dispatchers.IO) { keyStore.addPendingRegistration(reg.serverId, reg.registrationToken) }
         }
         return Registration(
             server = server.copy(
@@ -703,62 +696,97 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    /** Split-tunnel entries for apps that have since been uninstalled would make the VPN builder
+     *  reject the whole configuration (every connect would fail), so only installed ones are used. */
+    @Suppress("DEPRECATION")
+    private fun installedExcludedPackages(): Set<String> =
+        appSettings.excludedPackages.filterTo(HashSet()) { pkg ->
+            try {
+                packageManager.getApplicationInfo(pkg, 0)
+                true
+            } catch (_: PackageManager.NameNotFoundException) {
+                false
+            }
+        }
+
     private fun doConnect(chain: List<Server>, attemptIndex: Int) {
         val server = chain[attemptIndex]
         connectingServer = server
         updateStatusCard()
         lifecycleScope.launch {
-            val privateKey = keyStore.clientPrivateKeyBase64()
+            var registration: Registration? = null
+            try {
+                val privateKey = withContext(Dispatchers.IO) { keyStore.clientPrivateKeyBase64() }
 
-            val registration = try {
-                registerWithServer(server)
-            } catch (e: Exception) {
-                tryNextOrFail(chain, attemptIndex, "Registration failed: ${e.message}")
-                return@launch
-            }
+                val reg = try {
+                    registerWithServer(server)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    tryNextOrFail(chain, attemptIndex, "Registration failed: ${e.message}")
+                    return@launch
+                }
+                registration = reg
 
-            // Apply the user's DNS preference (Settings -> DNS) on top of whatever
-            // the server itself specifies -- "Server default" leaves connectServer.dns
-            // untouched; any other mode substitutes the chosen resolver.
-            val connectServer = registration.server.copy(dns = appSettings.resolveDns(registration.server.dns))
+                // Apply the user's DNS preference (Settings -> DNS) on top of whatever
+                // the server itself specifies -- "Server default" leaves connectServer.dns
+                // untouched; any other mode substitutes the chosen resolver.
+                val connectServer = reg.server.copy(dns = appSettings.resolveDns(reg.server.dns))
 
-            val result = tunnelManager.connect(
-                connectServer,
-                privateKey,
-                excludedPackages = appSettings.excludedPackages,
-                assignedAddressCidr = registration.assignedAddressCidr
-            )
-            result.onSuccess {
+                val result = tunnelManager.connect(
+                    connectServer,
+                    privateKey,
+                    excludedPackages = installedExcludedPackages(),
+                    assignedAddressCidr = reg.assignedAddressCidr
+                )
+                if (result.isFailure) {
+                    releaseRegistrationLease(reg.serverId, reg.token)
+                    tryNextOrFail(chain, attemptIndex, "Connection failed: ${result.exceptionOrNull()?.message}")
+                    return@launch
+                }
+
                 // The interface coming up doesn't prove it actually works -- verify
                 // real traffic flows through it before declaring success to the user.
-                val working = com.fastvpnn.app.util.ConnectivityCheckUtil.verifyInternetThroughVpnWithRetries(this@MainActivity)
-                if (working) {
-                    connectionFlowActive = false
-                    pendingChain = null
-                    connectedServer = server
-                    appSettings.lastConnectedServerId = server.id
-                    // This connect already used the current DNS setting (see
-                    // resolveDns() above), so any earlier pending-reconnect flag
-                    // is now moot -- clear it to avoid an unnecessary follow-up
-                    // reconnect next time onResume runs.
-                    appSettings.dnsChangePendingReconnect = false
-                    if (registration.token.isNotBlank()) {
-                        keyStore.promotePendingToActive(registration.serverId, registration.token)
-                    }
-                    updateStatusCard()
-                    updateActionButton()
-                    startConnectionStats()
-                    renderRows()
-                    NotificationHelper.showConnected(this@MainActivity, "${server.flagEmoji()} ${server.name}")
-                } else {
+                val working = ConnectivityCheckUtil.verifyInternetThroughVpnWithRetries(this@MainActivity)
+                if (!working) {
                     tunnelManager.disconnect()
-                    releaseRegistrationLease(registration.serverId, registration.token)
+                    releaseRegistrationLease(reg.serverId, reg.token)
                     tryNextOrFail(chain, attemptIndex, null)
+                    return@launch
                 }
-            }
-            result.onFailure {
-                releaseRegistrationLease(registration.serverId, registration.token)
-                tryNextOrFail(chain, attemptIndex, "Connection failed: ${it.message}")
+
+                // Past this point the tunnel is verified and in use: finish the bookkeeping even if
+                // the screen is being torn down, so the lease is never left half-promoted.
+                withContext(NonCancellable) {
+                    if (reg.token.isNotBlank()) {
+                        withContext(Dispatchers.IO) { keyStore.promotePendingToActive(reg.serverId, reg.token) }
+                    }
+                }
+                connectionFlowActive = false
+                pendingChain = null
+                connectedServer = server
+                appSettings.lastConnectedServerId = server.id
+                // This connect already used the current DNS / split-tunnel settings, so any earlier
+                // pending-reconnect flag is moot -- clear it to avoid a needless follow-up reconnect.
+                appSettings.settingsChangePendingReconnect = false
+                updateStatusCard()
+                updateActionButton()
+                startConnectionStats()
+                renderRows()
+                NotificationHelper.showConnected(this@MainActivity, "${server.flagEmoji()} ${server.name}")
+            } catch (e: CancellationException) {
+                // The screen was destroyed mid-connect (e.g. rotation). Don't leave a half-open
+                // tunnel and a dangling backend registration behind -- undo both, then propagate.
+                withContext(NonCancellable) {
+                    runCatching { tunnelManager.disconnect() }
+                    registration?.let { releaseRegistrationLease(it.serverId, it.token) }
+                }
+                throw e
+            } catch (e: Exception) {
+                // Anything unexpected (key store failure, malformed config...) must end as a normal
+                // failed attempt, never as an uncaught exception that kills the app.
+                registration?.let { releaseRegistrationLease(it.serverId, it.token) }
+                tryNextOrFail(chain, attemptIndex, "Connection failed: ${e.message}")
             }
         }
     }
@@ -766,28 +794,33 @@ class MainActivity : AppCompatActivity() {
     private suspend fun releaseRegistrationLease(serverId: String?, token: String?) {
         if (serverId.isNullOrBlank() || token.isNullOrBlank()) return
         val success = try {
-            serverSource.unregister(keyStore.clientPublicKeyBase64(), serverId, token)
+            val publicKey = withContext(Dispatchers.IO) { keyStore.clientPublicKeyBase64() }
+            serverSource.unregister(publicKey, serverId, token)
             true
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
-            false
+            false // the lease stays stored and is retried on the next launch
         }
         if (success) {
-            keyStore.removePendingRegistration(serverId, token)
-            if (keyStore.activeRegistration()?.serverId == serverId && keyStore.activeRegistration()?.token == token) {
-                keyStore.clearActiveRegistration()
+            withContext(Dispatchers.IO) {
+                keyStore.removePendingRegistration(serverId, token)
+                val active = keyStore.activeRegistration()
+                if (active?.serverId == serverId && active.token == token) keyStore.clearActiveRegistration()
             }
         }
     }
 
     private suspend fun releaseActiveRegistrationLease() {
-        val lease = keyStore.activeRegistration() ?: return
+        val lease = withContext(Dispatchers.IO) { keyStore.activeRegistration() } ?: return
         releaseRegistrationLease(lease.serverId, lease.token)
     }
 
     private suspend fun cleanupStaleRegistrationLeases() {
         // If the VPN is down, no registration lease should remain active.
-        keyStore.activeRegistration()?.let { releaseRegistrationLease(it.serverId, it.token) }
-        keyStore.pendingRegistrations().forEach { releaseRegistrationLease(it.serverId, it.token) }
+        val (active, pending) = withContext(Dispatchers.IO) { keyStore.activeRegistration() to keyStore.pendingRegistrations() }
+        active?.let { releaseRegistrationLease(it.serverId, it.token) }
+        pending.forEach { releaseRegistrationLease(it.serverId, it.token) }
     }
 
     private fun restoreConnectedServerFromSettings() {
@@ -811,7 +844,7 @@ class MainActivity : AppCompatActivity() {
             updateStatusCard()
             updateActionButton()
             val message = errorIfLast ?: "Couldn't establish a working internet connection through any nearby server."
-            android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show()
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -898,7 +931,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateActionButton() {
-        val busy = uiState() == UiState.CONNECTING
+        val busy = uiState() == UiState.CONNECTING || disconnectInProgress
         binding.powerButton.isEnabled = !busy
         binding.powerButton.contentDescription =
             if (tunnelManager.state == TunnelState.UP) "Disconnect" else "Connect"
@@ -920,6 +953,14 @@ class MainActivity : AppCompatActivity() {
         statsJob?.cancel()
         statsJob = lifecycleScope.launch {
             while (true) {
+                // The notification's Disconnect button (or the system) can drop the tunnel while this
+                // screen is visible; notice it here instead of showing "Connected" until the next resume.
+                if (!connectionFlowActive && !disconnectInProgress &&
+                    tunnelManager.syncStateFromBackend() == TunnelState.DOWN
+                ) {
+                    onDisconnected()
+                    return@launch
+                }
                 val stats = tunnelManager.statistics()
                 if (stats != null) {
                     binding.textDataUsage.text =

@@ -16,8 +16,6 @@ import com.fastvpnn.app.R
 import com.fastvpnn.app.data.AppSettings
 import com.fastvpnn.app.databinding.ActivitySettingsBinding
 import com.fastvpnn.app.databinding.ViewSettingRowBinding
-import com.fastvpnn.app.ads.AdsConsent
-import com.fastvpnn.app.ads.AdsManager
 import com.fastvpnn.app.util.ThemeUtil
 import com.fastvpnn.app.util.applyEdgeToEdgeInsets
 
@@ -46,7 +44,6 @@ class SettingsActivity : AppCompatActivity() {
         super.onResume()
         // DNS may have been changed from the dialog; keep the subtitle current.
         binding.rowDns.rowSubtitle.text = dnsLabel()
-        binding.rowAdChoices.rowSubtitle.text = AdsConsent.summary(this)
     }
 
     private fun setUpBottomNav() {
@@ -137,9 +134,6 @@ class SettingsActivity : AppCompatActivity() {
             startActivity(Intent.createChooser(send, "Share FastVPN"))
         }
         row(binding.rowHelp, R.drawable.ic_help, "Help & Support", "Get help when you need it") { openContactEmail() }
-        // Ads are required to use the app, so there is no "turn off ads" switch.
-        binding.rowAdChoices.root.visibility = View.GONE
-        binding.dividerAdChoices.visibility = View.GONE
         row(binding.rowPrivacy, R.drawable.ic_lock, "Privacy Policy", "") { openInBrowser("$siteBaseUrl/privacy.html") }
         row(binding.rowTerms, R.drawable.ic_doc, "Terms & Conditions", "") { openInBrowser("$siteBaseUrl/terms.html") }
         row(binding.rowAbout, R.drawable.ic_info, "About", "FastVPN v${BuildConfig.VERSION_NAME}") {
@@ -148,15 +142,6 @@ class SettingsActivity : AppCompatActivity() {
                 .setMessage("Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})\n\nContact: ${getString(R.string.contact_email)}")
                 .setPositiveButton("OK", null)
                 .show()
-        }
-        // Long-press About: shows which ad network started and why an ad did not load (for QA / support).
-        binding.rowAbout.root.setOnLongClickListener {
-            AlertDialog.Builder(this)
-                .setTitle("Ad status")
-                .setMessage(AdsManager.diagnostics())
-                .setPositiveButton("OK", null)
-                .show()
-            true
         }
     }
 
@@ -198,7 +183,7 @@ class SettingsActivity : AppCompatActivity() {
         else -> "Server default"
     }
 
-    /** See AppSettings.resolveDns / dnsChangePendingReconnect for how this is applied. */
+    /** See AppSettings.resolveDns / settingsChangePendingReconnect for how this is applied. */
     private fun showDnsDialog() {
         val checked = dnsModes.indexOf(settings.dnsMode).coerceAtLeast(0)
         AlertDialog.Builder(this)
@@ -210,7 +195,7 @@ class SettingsActivity : AppCompatActivity() {
                     showCustomDnsDialog()
                 } else {
                     settings.dnsMode = mode
-                    settings.dnsChangePendingReconnect = true
+                    settings.settingsChangePendingReconnect = true
                     binding.rowDns.rowSubtitle.text = dnsLabel()
                 }
             }
@@ -235,7 +220,7 @@ class SettingsActivity : AppCompatActivity() {
             .setPositiveButton("Save") { _, _ ->
                 settings.customDns = input.text.toString().trim()
                 settings.dnsMode = "custom"
-                settings.dnsChangePendingReconnect = true
+                settings.settingsChangePendingReconnect = true
                 binding.rowDns.rowSubtitle.text = dnsLabel()
                 Toast.makeText(this, "Custom DNS saved", Toast.LENGTH_SHORT).show()
             }

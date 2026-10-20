@@ -1,13 +1,6 @@
-# app-ads.txt for fastvpnn.pp.ua  (must also be the root domain of the "Website" on the Google Play listing)
-#
-# Ad networks only bid on apps whose app-ads.txt authorises them, so an empty file means little or no fill.
-# Still to add: the Unity line(s). Copy them EXACTLY from the dashboard and paste them at the bottom (no "#" in front):
-#
-#   Unity:  Unity Dashboard -> Monetization -> Settings -> Organization -> App-ads.txt -> "Show full list"
-#   Meta:   done (line below).
-#
-# After saving, redeploy the backend, open https://fastvpnn.pp.ua/app-ads.txt to confirm, then press
-# "Verify"/"Refresh" in each dashboard. Networks re-crawl it within about 24 hours.
-
-ownerdomain=fastvpnn.pp.ua
-facebook.com, 115279477912384, DIRECT, c3e20eee3f780d68
+# app-ads.txt for fastvpnn.pp.ua
+# This file must be served from the root of the website domain that is set as the "Website" on the
+# Google Play listing (https://fastvpnn.pp.ua/app-ads.txt). Ad networks only bid on apps whose
+# app-ads.txt authorises them, so without this line there is little or no ad fill.
+# Unity Ads: Organization core ID from the Unity Dashboard ("Complete app integration" screen).
+unity.com, 18968517092189, DIRECT, 96cabb5fbdde37a7

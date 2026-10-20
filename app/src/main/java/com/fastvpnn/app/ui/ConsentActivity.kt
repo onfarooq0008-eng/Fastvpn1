@@ -1,8 +1,10 @@
 package com.fastvpnn.app.ui
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.fastvpnn.app.data.AppSettings
 import com.fastvpnn.app.data.ServerCache
@@ -13,7 +15,7 @@ import com.fastvpnn.app.util.applyEdgeToEdgeInsets
  * Shown once, before MainActivity is ever reached, on first launch. Gates
  * access behind explicit acceptance of the Privacy Policy / Terms -- required
  * for Play Store review of any VPN app (BIND_VPN_SERVICE is a sensitive
- * permission) and for ads (Meta Audience Network). See backend/api/public/privacy.html and
+ * permission). See backend/api/public/privacy.html and
  * terms.html for the actual policy text -- served from AppSettings.backendApiUrl,
  * the same configurable backend host SettingsActivity's legal links use, rather
  * than a hardcoded domain that would silently go stale if that host ever changes.
@@ -32,10 +34,10 @@ class ConsentActivity : AppCompatActivity() {
 
         val siteBaseUrl = AppSettings(this).backendApiUrl.trimEnd('/')
         binding.linkPrivacy.setOnClickListener {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("$siteBaseUrl/privacy.html")))
+            openLink("$siteBaseUrl/privacy.html")
         }
         binding.linkTerms.setOnClickListener {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("$siteBaseUrl/terms.html")))
+            openLink("$siteBaseUrl/terms.html")
         }
 
         binding.buttonClose.setOnClickListener {
@@ -44,8 +46,7 @@ class ConsentActivity : AppCompatActivity() {
 
         binding.buttonAgree.setOnClickListener {
             AppSettings(this).hasAcceptedTerms = true
-            com.fastvpnn.app.ads.AdsManager.init(application)
-            // Ads start from MainActivity once the user has made their ad-privacy choice.
+            com.fastvpnn.app.ads.AdsManager.init(application) // no-op until ads are allowed in MainActivity's dialog
             // This is the one path to MainActivity that doesn't go through
             // SplashActivity, so it's the only other place that needs to start
             // the server prefetch -- otherwise a brand-new user's very first
@@ -53,6 +54,14 @@ class ConsentActivity : AppCompatActivity() {
             ServerCache.warm(this)
             startActivity(Intent(this, MainActivity::class.java))
             finish()
+        }
+    }
+
+    private fun openLink(url: String) {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(this, "No browser app found to open this link", Toast.LENGTH_SHORT).show()
         }
     }
 }

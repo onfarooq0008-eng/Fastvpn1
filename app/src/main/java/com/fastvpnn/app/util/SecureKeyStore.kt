@@ -1,13 +1,20 @@
 package com.fastvpnn.app.util
 
 import android.content.Context
+import android.content.SharedPreferences
+import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.wireguard.crypto.KeyPair
 import org.json.JSONArray
 import org.json.JSONObject
+import java.security.KeyStore
 
 /** Generates the device's WireGuard key pair once, stores the private key encrypted-at-rest.
+ *
+ *  Use [get] -- one shared instance per process. Creating EncryptedSharedPreferences opens the
+ *  Android Keystore, which is slow (tens to hundreds of ms), so it must happen once and preferably
+ *  off the main thread (MainActivity warms it on a background thread at startup).
  *
  *  Uses EncryptedSharedPreferences/MasterKey, which security-crypto 1.1.0 deprecates in
  *  favor of Jetpack DataStore + Tink. Left as-is here since the deprecated APIs are still
@@ -15,27 +22,60 @@ import org.json.JSONObject
  *  (so existing installs don't lose their WireGuard identity) -- worth planning as its own
  *  change rather than folding it into an unrelated dependency bump. */
 @Suppress("DEPRECATION")
-class SecureKeyStore(context: Context) {
+class SecureKeyStore private constructor(context: Context) {
 
-    private val masterKey = MasterKey.Builder(context)
-        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-        .build()
+    private val prefs: SharedPreferences = createPrefs(context)
 
-    private val prefs = EncryptedSharedPreferences.create(
-        context, "fastvpn_secure", masterKey,
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-    )
+    companion object {
+        private const val TAG = "FastVPN-Keys"
+        private const val FILE = "fastvpn_secure"
+        private const val MASTER_KEY_ALIAS = "_androidx_security_master_key_"
 
+        @Volatile private var instance: SecureKeyStore? = null
+
+        fun get(context: Context): SecureKeyStore =
+            instance ?: synchronized(this) {
+                instance ?: SecureKeyStore(context.applicationContext).also { instance = it }
+            }
+
+        private fun open(context: Context): SharedPreferences {
+            val masterKey = MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            return EncryptedSharedPreferences.create(
+                context, FILE, masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        }
+
+        /** The Keystore master key can be lost or invalidated (OS update, lock-screen change on some
+         *  OEMs, a restored backup). Without recovery EncryptedSharedPreferences throws on EVERY launch
+         *  and the app crashes forever. Starting over costs only the device's WireGuard identity: the
+         *  next connect registers a fresh key, and the old peer is pruned server-side. */
+        private fun createPrefs(context: Context): SharedPreferences = try {
+            open(context)
+        } catch (e: Exception) {
+            Log.e(TAG, "Secure storage unreadable -- resetting it", e)
+            context.deleteSharedPreferences(FILE)
+            runCatching {
+                KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(MASTER_KEY_ALIAS)
+            }
+            open(context)
+        }
+    }
+
+    /** Synchronized so two threads can never each generate a different key pair on first run, and
+     *  committed synchronously so a process kill right after registration can't lose the key the
+     *  server just registered. */
+    @Synchronized
     fun getOrCreateKeyPair(): KeyPair {
         val existing = prefs.getString("priv_key", null)
         if (existing != null) return KeyPair(com.wireguard.crypto.Key.fromBase64(existing))
         val pair = KeyPair()
-        prefs.edit().putString("priv_key", pair.privateKey.toBase64()).apply()
+        prefs.edit().putString("priv_key", pair.privateKey.toBase64()).commit()
         return pair
     }
-
-    /** Give this public key to your server-setup script to register the client as a peer. */
 
     data class RegistrationLease(val serverId: String, val token: String)
 
@@ -96,6 +136,7 @@ class SecureKeyStore(context: Context) {
         removePendingRegistration(serverId, token)
         setActiveRegistration(serverId, token)
     }
+
     fun clientPublicKeyBase64(): String = getOrCreateKeyPair().publicKey.toBase64()
     fun clientPrivateKeyBase64(): String = getOrCreateKeyPair().privateKey.toBase64()
 }

@@ -24,6 +24,15 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Set up Node.js (for the backend tests)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run backend tests
+        working-directory: backend/api
+        run: npm test
+
       - name: Set up Android SDK
         run: |
           # We used to call android-actions/setup-android@v3 here, but that

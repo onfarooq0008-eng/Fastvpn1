@@ -1,9 +1,11 @@
 package com.fastvpnn.app.util
 
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withTimeoutOrNull
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -21,41 +23,32 @@ import java.net.Socket
  */
 object PingUtil {
 
-    suspend fun pingHost(host: String, port: Int, timeoutMs: Int = 1500): Int = withContext(Dispatchers.IO) {
-        if (host.isBlank() || host == "0.0.0.0") return@withContext -2
-        // withTimeoutOrNull bounds the WHOLE attempt, not just the TCP connect.
-        // InetSocketAddress(host, port) resolves DNS synchronously with no
-        // timeout of its own -- on a cold/flaky network (very common right
-        // after a fresh install, before the OS resolver has anything cached)
-        // that lookup alone can block far longer than timeoutMs. Without this
-        // outer bound, one slow-to-resolve host hangs the whole pingAll()
-        // batch (they're awaited together), leaving every row on the home
-        // screen stuck on "Checking..." until the app is restarted onto a
-        // since-stabilized network -- restarting isn't what actually fixes
-        // it, waiting is. Cooperative cancellation can't interrupt the
-        // blocking JVM call underneath, but it does let this coroutine give
-        // up and report "unreachable" promptly instead of waiting on it.
-        withTimeoutOrNull(timeoutMs.toLong()) {
-            try {
-                val start = System.currentTimeMillis()
-                Socket().use { socket ->
-                    socket.connect(InetSocketAddress(host, port), timeoutMs)
-                }
-                (System.currentTimeMillis() - start).toInt()
-            } catch (e: Exception) {
-                -2 // unreachable / timeout
-            }
-        } ?: -2 // outer timeout fired -- DNS or connect took too long
+    // The blocking probe runs in its OWN scope, not as a child of the caller. A coroutine that is
+    // stuck inside a blocking JVM call (DNS lookup, socket connect) cannot be interrupted, and a
+    // parent scope always waits for its children -- so a probe started as a child would make
+    // withTimeoutOrNull wait for it anyway and the timeout would never actually fire.
+    private val probeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    suspend fun pingHost(host: String, port: Int, timeoutMs: Int = 1500): Int {
+        if (host.isBlank() || host == "0.0.0.0") return -2
+        val probe = probeScope.async { tcpConnectMs(host, port, timeoutMs) }
+        // InetSocketAddress(host, port) resolves DNS synchronously with no timeout of its own, which
+        // on a cold/flaky network can block far longer than the connect timeout. Waiting on the
+        // probe here (a real suspension point) lets us give up promptly and report "unreachable"
+        // instead of leaving every row stuck on "Checking..." until the lookup finally returns.
+        return withTimeoutOrNull(timeoutMs * 2L) { probe.await() } ?: -2
+    }
+
+    private fun tcpConnectMs(host: String, port: Int, timeoutMs: Int): Int = try {
+        val start = System.currentTimeMillis()
+        Socket().use { it.connect(InetSocketAddress(host, port), timeoutMs) }
+        (System.currentTimeMillis() - start).toInt()
+    } catch (e: Exception) {
+        -2 // unreachable / timeout
     }
 
     /** Ping many hosts concurrently, returns map of id -> ms (-2 if unreachable). */
-    suspend fun pingAll(targets: List<Triple<String, String, Int>>): Map<String, Int> = coroutineScopePingAll(targets)
-
-    private suspend fun coroutineScopePingAll(targets: List<Triple<String, String, Int>>): Map<String, Int> =
-        withContext(Dispatchers.IO) {
-            val jobs = targets.map { (id, host, port) ->
-                async { id to pingHost(host, port) }
-            }
-            jobs.awaitAll().toMap()
-        }
+    suspend fun pingAll(targets: List<Triple<String, String, Int>>): Map<String, Int> = coroutineScope {
+        targets.map { (id, host, port) -> async { id to pingHost(host, port) } }.awaitAll().toMap()
+    }
 }

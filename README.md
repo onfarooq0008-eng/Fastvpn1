@@ -9,7 +9,7 @@ yourself, with:
 - **Automatic device registration** via a backend API baked into the app
   itself — every user who installs the app gets your servers automatically,
   zero setup on their end. See `/backend`.
-- **100% free, ad-supported** — no paywall, monetized through Meta Audience Network
+- **100% free, ad-supported** — no paywall, one Unity banner ad
 - **Search**, **dark mode**, **split tunneling**, a **connection timer + data
   usage** counter, and a **persistent notification with a one-tap Disconnect
   button** while connected
@@ -77,13 +77,15 @@ of the app uses it automatically, no per-device setup needed by anyone.
 
 ---
 
-## 4. Ads (Meta Audience Network + Unity Ads)
+## 4. Ads (Unity Ads, banner only)
 
-1. All IDs live in `app/src/main/java/com/fastvpnn/app/ads/AdConfig.kt` (Meta placement IDs, Unity game ID + placements,
-   frequency caps). Leave an ID empty to switch that format off.
-2. Debug builds always use test ads. Release builds use real ads (`USE_TEST_ADS` in `app/build.gradle`, per build type).
-3. Screens only call `AdsManager` -- never an ad SDK directly. See `UPGRADE_NOTES.md` for the full guide.
-4. Put each network's `app-ads.txt` line into `backend/api/public/app-ads.txt`.
+One Unity banner above the bottom navigation bar on the Home screen. No interstitial, native or rewarded ads.
+
+1. IDs live in `app/src/main/java/com/fastvpnn/app/ads/AdConfig.kt` (Game ID `800391481`, placement `BP_Banner_Android`).
+2. Debug builds always use Unity test mode; release builds show real ads. To ship a release that shows only test ads, set `USE_TEST_ADS` to `"true"` in the release block of `app/build.gradle`.
+3. The user must tap **Allow** on the ad dialog (`ads/AdsConsent.kt`) before Unity starts and before any ad is requested.
+4. `backend/api/public/app-ads.txt` holds Unity's line (Organization core ID); redeploy the backend after changing it.
+5. Play Console: Ads declaration = "Yes, contains ads"; Data safety must list the advertising ID (shared with Unity).
 
 ---
 
@@ -120,7 +122,7 @@ Tell me when you're ready and I'll write the exact Caddy config for your domain.
 
 ## 6. Monetization
 
-No paywall, no subscriptions — every server is free. Meta + Unity banner/interstitial/rewarded, Meta native + native banner, app-open style ad.
+No paywall, no subscriptions — every server is free, and the only ad is one Unity banner.
 
 ---
 
@@ -161,7 +163,6 @@ the app process was recreated.
       ask me when you're ready and I'll set that up with GitHub Secrets so
       your keystore password never touches the repo).
 - [ ] **HTTPS backend** — see section 5.
-- [ ] **Real ad IDs in `AdConfig.kt`**, release build uses real ads — see section 4.
 - [ ] **Privacy Policy**, linked in Play Console → App content. Any VPN app
       needs one. Ask me and I'll help draft one based on what this app
       actually collects.
@@ -186,7 +187,6 @@ FastVPN/
                    split tunneling picker, settings, splash
     admin/        Admin login, panel (list/CRUD + backend URL), add/edit
                    server form
-    ads/          AdsManager + Meta/Unity providers, consent, config
     util/         Ping, secure on-device keystore, per-device tunnel address
                    derivation, notification helper, system VPN state check
   app/src/debug/  Debug-only cleartext HTTP config for local backend testing
@@ -203,8 +203,20 @@ rename or remove it.
 
 | Item | Where |
 |---|---|
-| Ad network IDs + frequency caps | `ads/AdConfig.kt` |
 | App icon / branding | `res/mipmap-anydpi-v26`, `res/drawable` |
 | HTTPS for your backend | See section 5 |
 | Signing keystore | See section 9 |
 | Privacy policy | Play Console + ask me to help draft it |
+
+## 12. Address allocation, tests, and scaling the store
+
+`backend/api/store.js` hands out each device's WireGuard address (`.2`-`.254` of the server's /24).
+
+- **Addresses are reused.** Anything freed by unregister, pruning, reconcile or a failed registration goes back into the pool. Never-used addresses are handed out first, then the one that has been free the longest, so a just-freed IP is the last to come back.
+- **No duplicates.** Allocation runs under an in-process queue plus a lock file (so `reconcile-registrations.js` can run beside the API), and `saveRegistration` re-checks the reservation before writing.
+- **No leaks.** Reservations that never finish (crash, hung agent) expire after `RESERVATION_TTL_MS` (default 120000).
+- Old `store.json` files work unchanged; addresses leaked by the old counter become reusable automatically.
+
+Run the tests (Node 22+, no install needed): `cd backend/api && npm test`
+
+The store is still a single JSON file, fine for a few thousand devices on one API process. When you outgrow it (many API processes, or tens of thousands of devices), move to SQLite: a `registrations` table with `UNIQUE(server_id, assigned_address)` and `UNIQUE(device_key, server_id)`, and run `reserveAddress` inside a `BEGIN IMMEDIATE` transaction. The function names in `store.js` map one-to-one, and the tests can be reused against the new backend.
