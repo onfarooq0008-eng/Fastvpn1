@@ -9,12 +9,17 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import com.unity3d.ads.IUnityAdsInitializationListener
+import com.unity3d.ads.BannerAd
+import com.unity3d.ads.BannerConfiguration
+import com.unity3d.ads.BannerShowListener
+import com.unity3d.ads.BannerSize
+import com.unity3d.ads.InitializationConfiguration
+import com.unity3d.ads.InitializationListener
+import com.unity3d.ads.LoadListener
+import com.unity3d.ads.LogLevel
 import com.unity3d.ads.UnityAds
-import com.unity3d.ads.metadata.MetaData
-import com.unity3d.services.banners.BannerErrorInfo
-import com.unity3d.services.banners.BannerView
-import com.unity3d.services.banners.UnityBannerSize
+import com.unity3d.ads.UnityAdsError
+import com.unity3d.ads.UnityAdsExperimental
 import java.lang.ref.WeakReference
 
 /**
@@ -24,8 +29,9 @@ import java.lang.ref.WeakReference
  *   AdsManager.showBanner(activity, view)   -- view stays hidden until an ad has really loaded
  *   AdsManager.hideBanner(view)             -- call from onDestroy
  *
- * Uses Unity's BannerView API (still shipped in SDK 4.21, marked deprecated since 4.19). Everything runs on
- * the main thread and nothing here can throw into UI code.
+ * Uses the SDK 4.20+ API (InitializationConfiguration + BannerAd.load), the same calls the previously working
+ * project used. The legacy BannerView / UnityAds.initialize(context, ...) path was removed from this file.
+ * Everything runs on the main thread and nothing here can throw into UI code.
  */
 object AdsManager {
 
@@ -40,7 +46,7 @@ object AdsManager {
 
     private var request: Request? = null
     private var token = 0
-    private var banner: BannerView? = null
+    private var banner: BannerAd? = null
     private var loading = false
     private var active = false
     private var retries = 0
@@ -49,23 +55,30 @@ object AdsManager {
     // ============================ init ============================
 
     /** Does nothing until the user has allowed ads (see AdsConsent). Never blocks: Unity initialises asynchronously. */
+    @OptIn(UnityAdsExperimental::class)
     fun init(app: Application) {
         if (state != State.NOT_STARTED || !AdsConsent.isAccepted(app)) return
         state = State.INITIALIZING
         try {
             // The user allowed ads in the consent dialog.
-            MetaData(app).apply { set("gdpr.consent", true); commit() }
-            MetaData(app).apply { set("privacy.consent", true); commit() }
-            UnityAds.initialize(app, AdConfig.GAME_ID, AdConfig.isTestMode, object : IUnityAdsInitializationListener {
-                override fun onInitializationComplete() {
+            try {
+                UnityAds.userConsent = true
+                UnityAds.nonBehavioral = false
+            } catch (t: Throwable) {
+                Log.w(TAG, "Unity privacy flags failed: ${t.javaClass.simpleName}")
+            }
+            val config = InitializationConfiguration.Builder(AdConfig.GAME_ID)
+                .withTestMode(AdConfig.isTestMode)
+                .withLogLevel(if (AdConfig.isTestMode) LogLevel.DEBUG else LogLevel.ERROR)
+                .build()
+            UnityAds.initialize(config, InitializationListener { error ->
+                if (error == null) {
                     state = State.READY
                     Log.i(TAG, "Unity initialized (test=${AdConfig.isTestMode})")
                     request?.let { if (!active && !loading && !retryQueued) tryLoad(it.token) }
-                }
-
-                override fun onInitializationFailed(error: UnityAds.UnityAdsInitializationError?, message: String?) {
+                } else {
                     state = State.FAILED
-                    Log.w(TAG, "Unity init failed: $error $message")
+                    Log.w(TAG, "Unity init failed: error=$error")
                 }
             })
         } catch (t: Throwable) {
@@ -93,7 +106,7 @@ object AdsManager {
         loading = false
         active = false
         retryQueued = false
-        try { banner?.destroy() } catch (_: Throwable) {}
+        try { banner?.view?.let { v -> (v.parent as? ViewGroup)?.removeView(v) } } catch (_: Throwable) {}
         banner = null
         req?.container?.get()?.let { it.removeAllViews(); it.visibility = View.GONE }
         request = null
@@ -108,42 +121,39 @@ object AdsManager {
         if (state != State.READY) return // loaded from onInitializationComplete once Unity is up
         loading = true
         try {
-            val view = BannerView(activity, AdConfig.BANNER_PLACEMENT_ID, UnityBannerSize(320, 50))
-            banner = view
-            var reported = false // Unity refreshes banners itself and can call onBannerLoaded repeatedly
-            view.listener = object : BannerView.IListener {
-                override fun onBannerLoaded(bannerAdView: BannerView?) {
-                    if (reported || req.token != token) return
-                    reported = true
+            val showListener = object : BannerShowListener {
+                override fun onImpression(banner: BannerAd) {}
+                override fun onClicked(banner: BannerAd) {}
+                override fun onFailedToShow(banner: BannerAd, error: UnityAdsError) {
+                    Log.w(TAG, "banner failed to show: code=${error.code} error=$error")
+                }
+            }
+            val config = BannerConfiguration.Builder(AdConfig.BANNER_PLACEMENT_ID, BannerSize(320, 50), showListener).build()
+            BannerAd.load(config, object : LoadListener<BannerAd> {
+                override fun onAdLoaded(ad: BannerAd?, error: UnityAdsError?) {
+                    if (req.token != token) { // screen changed/destroyed while loading
+                        return
+                    }
                     loading = false
+                    val view = ad?.view
+                    if (ad == null || view == null || error != null || activity.isFinishing || activity.isDestroyed) {
+                        Log.i(TAG, "banner failed: code=${error?.code} error=$error")
+                        container.removeAllViews()
+                        container.visibility = View.GONE
+                        scheduleRetry(forToken)
+                        return
+                    }
+                    banner = ad
                     active = true
+                    container.removeAllViews()
+                    container.addView(
+                        view,
+                        FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL)
+                    )
                     container.visibility = View.VISIBLE
                     Log.i(TAG, "banner loaded")
                 }
-
-                override fun onBannerFailedToLoad(bannerAdView: BannerView?, errorInfo: BannerErrorInfo?) {
-                    Log.i(TAG, "banner failed: code=${errorInfo?.errorCode} msg=${errorInfo?.errorMessage}")
-                    if (reported || req.token != token) return // a later refresh failing keeps the last ad on screen
-                    reported = true
-                    loading = false
-                    try { view.destroy() } catch (_: Throwable) {}
-                    if (banner === view) banner = null
-                    container.removeAllViews()
-                    container.visibility = View.GONE
-                    scheduleRetry(forToken)
-                }
-
-                // Required since Unity Ads 4.21 (the interface gained this callback).
-                override fun onBannerShown(bannerAdView: BannerView?) {}
-                override fun onBannerClick(bannerAdView: BannerView?) {}
-                override fun onBannerLeftApplication(bannerAdView: BannerView?) {}
-            }
-            container.removeAllViews()
-            container.addView(
-                view,
-                FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL)
-            )
-            view.load()
+            })
         } catch (t: Throwable) {
             loading = false
             Log.w(TAG, "banner crashed: ${t.javaClass.simpleName}")
