@@ -57,6 +57,11 @@ class VpnActionReceiver : BroadcastReceiver() {
                 if (result.isSuccess) {
                     Log.d(TAG, "local tunnel teardown: success")
                     val appContext = context.applicationContext
+                    // Remove the notification the moment the tunnel is down. It used to be cleared only
+                    // AFTER the key store was opened and the backend unregister call finished (up to
+                    // several seconds), so the notification lingered after the VPN was already off.
+                    NotificationHelper.clear(appContext)
+                    Log.d(TAG, "notification cleared")
                     val keyStore = SecureKeyStore.get(appContext)
                     val serverSource = ServerSource(appContext)
                     val active = keyStore.activeRegistration()
@@ -74,8 +79,6 @@ class VpnActionReceiver : BroadcastReceiver() {
                     } else {
                         Log.d(TAG, "no active registration lease found to unregister")
                     }
-                    NotificationHelper.clear(appContext)
-                    Log.d(TAG, "notification cleared")
                 } else {
                     // Local teardown failed -- deliberately leave the notification and
                     // backend registration alone, since the tunnel may genuinely still

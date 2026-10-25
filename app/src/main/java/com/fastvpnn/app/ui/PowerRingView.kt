@@ -41,6 +41,11 @@ class PowerRingView @JvmOverloads constructor(
         strokeCap = Paint.Cap.ROUND
     }
 
+    // Soft expanding "sonar" rings drawn outside the main ring while connecting / connected.
+    private val pulsePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    private var pulse = 0f
+    private var pulseAnimator: ValueAnimator? = null
+
     private var spin = 0f
     private var animator: ValueAnimator? = null
     private var cx = 0f
@@ -89,6 +94,8 @@ class PowerRingView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         canvas.drawCircle(cx, cy, glowRadius, glowPaint)
+        drawPulse(canvas, pulse)
+        drawPulse(canvas, (pulse + 0.5f) % 1f) // second ring, half a cycle behind
         canvas.drawCircle(cx, cy, discRadius, discPaint)
         canvas.save()
         canvas.rotate(spin, cx, cy)
@@ -96,7 +103,40 @@ class PowerRingView @JvmOverloads constructor(
         canvas.restore()
     }
 
+    private fun drawPulse(canvas: Canvas, t: Float) {
+        if (ringState == State.DISCONNECTED || pulseAnimator == null) return
+        val base = if (ringState == State.CONNECTED) color(R.color.ringGreen) else color(R.color.ringBlue)
+        val alpha = ((1f - t) * 90).toInt().coerceIn(0, 255)
+        pulsePaint.strokeWidth = ringPaint.strokeWidth * 0.35f
+        pulsePaint.color = (alpha shl 24) or (base and 0x00FFFFFF)
+        canvas.drawCircle(cx, cy, ringRadius + (glowRadius - ringRadius) * t, pulsePaint)
+    }
+
+    private fun updatePulseAnimator() {
+        val wanted = ringState != State.DISCONNECTED && isAttachedToWindow && animationsAllowed()
+        if (wanted) {
+            if (pulseAnimator == null) {
+                pulseAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+                    duration = 2600
+                    repeatCount = ValueAnimator.INFINITE
+                    interpolator = LinearInterpolator()
+                    addUpdateListener { pulse = it.animatedValue as Float; invalidate() }
+                    start()
+                }
+            }
+        } else {
+            pulseAnimator?.cancel()
+            pulseAnimator = null
+            pulse = 0f
+        }
+    }
+
+    /** Respect the system "remove animations" setting (API 26+); older versions always animate. */
+    private fun animationsAllowed(): Boolean =
+        android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O || ValueAnimator.areAnimatorsEnabled()
+
     private fun updateAnimator() {
+        updatePulseAnimator()
         if (ringState == State.CONNECTING && isAttachedToWindow) {
             if (animator == null) {
                 animator = ValueAnimator.ofFloat(0f, 360f).apply {
@@ -122,6 +162,8 @@ class PowerRingView @JvmOverloads constructor(
     override fun onDetachedFromWindow() {
         animator?.cancel()
         animator = null
+        pulseAnimator?.cancel()
+        pulseAnimator = null
         super.onDetachedFromWindow()
     }
 }

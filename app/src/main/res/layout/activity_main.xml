@@ -50,20 +50,30 @@
                         <LinearLayout
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
                             android:orientation="horizontal">
+                            <ImageView
+                                android:layout_width="34dp"
+                                android:layout_height="34dp"
+                                android:layout_marginEnd="8dp"
+                                android:background="@drawable/bg_logo_tile"
+                                android:importantForAccessibility="no"
+                                android:padding="7dp"
+                                android:src="@drawable/ic_shield_check"
+                                app:tint="@color/white" />
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="Fast"
                                 android:textColor="@color/textPrimary"
-                                android:textSize="34sp"
+                                android:textSize="28sp"
                                 android:textStyle="bold" />
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="VPN"
                                 android:textColor="@color/primary"
-                                android:textSize="34sp"
+                                android:textSize="28sp"
                                 android:textStyle="bold" />
                         </LinearLayout>
                         <TextView
@@ -71,7 +81,7 @@
                             android:layout_height="wrap_content"
                             android:text="Fast  •  Secure  •  Unlimited"
                             android:textColor="@color/gray"
-                            android:textSize="14sp" />
+                            android:textSize="12sp" />
                     </LinearLayout>
 
                     <LinearLayout
@@ -109,7 +119,7 @@
                     android:clickable="true"
                     android:focusable="true"
                     app:cardBackgroundColor="@color/cardBackground"
-                    app:cardCornerRadius="16dp"
+                    app:cardCornerRadius="20dp"
                     app:cardElevation="0dp"
                     app:strokeColor="@color/divider"
                     app:strokeWidth="1dp">
@@ -217,7 +227,7 @@
                     android:clickable="true"
                     android:focusable="true"
                     app:cardBackgroundColor="@color/cardBackground"
-                    app:cardCornerRadius="18dp"
+                    app:cardCornerRadius="20dp"
                     app:cardElevation="0dp"
                     app:strokeColor="@color/divider"
                     app:strokeWidth="1dp">
@@ -283,7 +293,8 @@
                         android:gravity="center_horizontal"
                         android:orientation="vertical">
                         <ImageView
-                            android:layout_width="26dp" android:layout_height="26dp"
+                            android:layout_width="46dp" android:layout_height="46dp"
+                            android:background="@drawable/bg_icon_circle" android:padding="11dp"
                             android:importantForAccessibility="no"
                             android:src="@drawable/ic_bolt" app:tint="@color/primary" />
                         <TextView
@@ -302,7 +313,8 @@
                         android:gravity="center_horizontal"
                         android:orientation="vertical">
                         <ImageView
-                            android:layout_width="26dp" android:layout_height="26dp"
+                            android:layout_width="46dp" android:layout_height="46dp"
+                            android:background="@drawable/bg_icon_circle" android:padding="11dp"
                             android:importantForAccessibility="no"
                             android:src="@drawable/ic_shield_check" app:tint="@color/primary" />
                         <TextView
@@ -321,7 +333,8 @@
                         android:gravity="center_horizontal"
                         android:orientation="vertical">
                         <ImageView
-                            android:layout_width="26dp" android:layout_height="26dp"
+                            android:layout_width="46dp" android:layout_height="46dp"
+                            android:background="@drawable/bg_icon_circle" android:padding="11dp"
                             android:importantForAccessibility="no"
                             android:src="@drawable/ic_globe" app:tint="@color/primary" />
                         <TextView
@@ -458,6 +471,16 @@
                 android:textColor="@color/textPrimary"
                 android:textColorHint="@color/gray"
                 android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/textUpdated"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="20dp"
+                android:layout_marginTop="8dp"
+                android:textColor="@color/gray"
+                android:textSize="12sp"
+                android:visibility="gone" />
 
             <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
                 android:id="@+id/swipeRefresh"

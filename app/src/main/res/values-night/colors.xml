@@ -4,7 +4,10 @@
     <color name="primaryDark">#0A2A66</color>
     <color name="accent">#22E58B</color>
     <color name="background">#050B1A</color>
-    <color name="backgroundEnd">#08142E</color>
+    <color name="backgroundMid">#071231</color>
+    <color name="backgroundEnd">#0A1B42</color>
+    <color name="cardBackgroundEnd">#112343</color>
+    <color name="iconCircleEnd">#1B3158</color>
     <color name="white">#FFFFFF</color>
     <color name="black">#F2F6FF</color>
     <color name="gray">#8FA3C4</color>

@@ -12,16 +12,32 @@ class ServerSource(context: Context) {
     private val appSettings = AppSettings(context)
     private val backendClient = BackendApiClient()
 
-    suspend fun getServers(): List<Server> {
+    private val appContext = context.applicationContext
+
+    /**
+     * Returns the server list, using the on-disk cache so the app doesn't hit the network on every
+     * open (see [ServerCache]):
+     *  - cache younger than 24h and [forceRefresh] is false -> returned immediately, no network;
+     *  - otherwise the backend is fetched and the result saved for next time;
+     *  - if that fetch fails and an older cached list exists, the old list is returned instead of an
+     *    error (unless [forceRefresh], where the caller wants to know it failed).
+     *
+     * We never turn a failure into an empty list: the caller keeps its last known-good list on a
+     * thrown exception, and an empty list would look like "the backend really has zero servers".
+     */
+    suspend fun getServers(forceRefresh: Boolean = false): List<Server> {
         val backendUrl = appSettings.backendApiUrl
-        // Backend is authoritative, so we don't silently fall back to a local list
-        // (those servers couldn't be registered through the backend anyway) --
-        // but we also must NOT swallow the failure into an empty list here. The
-        // caller (MainActivity) keeps showing its last known-good server list on
-        // a thrown exception; returning emptyList() on every hiccup used to look
-        // identical to "the backend really has zero servers" and wiped the whole
-        // list on screen for a purely transient network error.
-        return backendClient.fetchServers(backendUrl)
+        val cached = ServerCache.snapshot(appContext)
+        if (!forceRefresh && cached != null && cached.isFresh()) return cached.servers
+        return try {
+            val servers = backendClient.fetchServers(backendUrl)
+            ServerCache.save(appContext, backendUrl, servers)
+            servers
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (!forceRefresh && cached != null) cached.servers else throw e
+        }
     }
 
     suspend fun register(devicePublicKeyBase64: String, preferredServerId: String?): BackendRegistration {

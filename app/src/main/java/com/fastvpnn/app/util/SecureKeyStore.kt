@@ -119,6 +119,7 @@ class SecureKeyStore private constructor(context: Context) {
             .putString("active_registration_token", token).apply()
     }
 
+    @Synchronized
     fun activeRegistration(): RegistrationLease? {
         val serverId = prefs.getString("active_registration_server_id", null) ?: return null
         val token = prefs.getString("active_registration_token", null) ?: return null

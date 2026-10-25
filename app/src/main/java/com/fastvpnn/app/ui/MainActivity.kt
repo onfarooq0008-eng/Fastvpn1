@@ -16,7 +16,9 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.SimpleItemAnimator
 import com.fastvpnn.app.BuildConfig
@@ -81,7 +83,10 @@ class MainActivity : AppCompatActivity() {
     // Only one server refresh at a time, and never two within one interval (see startServerAutoRefresh).
     private val refreshMutex = Mutex()
     private var lastRefreshStartedAt = 0L
+    private var lastPingAt = 0L
     private var connectingServer: Server? = null
+    // False until the first server load has finished, so an empty list reads "Loading…" not "No locations".
+    private var initialLoadDone = false
 
     private enum class Tab { HOME, LOCATIONS }
     private enum class LocationFilter { ALL, STREAMING, FAVORITES }
@@ -118,6 +123,17 @@ class MainActivity : AppCompatActivity() {
         serverSource = ServerSource(this)
         appSettings = AppSettings(this)
         tunnelManager = VpnTunnelManagerHolder.get(this)
+        // React instantly when the tunnel is taken down from outside this screen (the notification's
+        // Disconnect button): stop the timer and reset the UI right away, not on the next 2 s poll.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                tunnelManager.stateFlow.collect { s ->
+                    if (s == TunnelState.DOWN && !connectionFlowActive && !disconnectInProgress && uiShowsConnected()) {
+                        onDisconnected()
+                    }
+                }
+            }
+        }
         // Warm the key store in the background so the first Connect tap doesn't pay for it.
         lifecycleScope.launch(Dispatchers.IO) { runCatching { keyStore } }
 
@@ -135,7 +151,8 @@ class MainActivity : AppCompatActivity() {
         )
         binding.recyclerServers.adapter = adapter
 
-        binding.swipeRefresh.setOnRefreshListener { loadAndPing() }
+        // Pull-to-refresh is the user explicitly asking for new data: skip the 24h cache.
+        binding.swipeRefresh.setOnRefreshListener { loadAndPing(forceRefresh = true) }
         binding.powerButton.setOnClickListener { onActionButtonTapped() }
         binding.chronometerConnected.setOnChronometerTickListener { c ->
             c.text = formatElapsed(SystemClock.elapsedRealtime() - c.base)
@@ -175,7 +192,16 @@ class MainActivity : AppCompatActivity() {
 
         // Pick up the fetch SplashActivity already started while its logo was
         // showing, so this first load doesn't start the network call from zero.
-        loadAndPing(warmPrefetch = ServerCache.take(), onDone = {
+        // Show the saved server list right now (read from local storage, no network), so the user
+        // never waits on a loading state. The load below then re-pings, and only goes to the
+        // network if the saved list is older than 24h (see ServerSource.getServers).
+        val cachedServers = ServerCache.snapshot(this)?.servers
+        if (!cachedServers.isNullOrEmpty()) {
+            allServers = cachedServers
+            renderRows()
+        }
+
+        loadAndPing(warmPrefetch = ServerCache.take(), showSpinner = cachedServers.isNullOrEmpty(), onDone = {
             lifecycleScope.launch {
                 // Always reconcile the real WireGuard state before deciding whether to
                 // auto-connect. This prevents an Activity-startup race from launching
@@ -259,6 +285,10 @@ class MainActivity : AppCompatActivity() {
         currentFocus?.let {
             (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(it.windowToken, 0)
         }
+        // Opening Locations after a while on Home: bring the ping times up to date right away.
+        if (!home && initialLoadDone && SystemClock.elapsedRealtime() - lastPingAt > SERVER_REFRESH_INTERVAL_MS) {
+            lifecycleScope.launch { refreshServers(showSpinner = false) }
+        }
     }
 
     private fun setFilter(filter: LocationFilter) {
@@ -325,15 +355,23 @@ class MainActivity : AppCompatActivity() {
                 startStatsPolling()
             }
             reconnectIfDnsSettingChanged()
-        } else if (wasConnected) {
+        } else if (wasConnected || uiShowsConnected()) {
+            // The tunnel went down while we were in the background (e.g. notification Disconnect).
+            // `wasConnected` alone misses this: the receiver shares our tunnel manager, so its state
+            // already reads DOWN here even though the timer is still running on screen.
             connectedServer = null
             stopConnectionStats()
+            NotificationHelper.clear(this)
         }
         updateStatusCard()
         updateActionButton()
 
         startServerAutoRefresh()
     }
+
+    /** True while the screen is still showing a live connection (timer / connected server). */
+    private fun uiShowsConnected(): Boolean =
+        connectedServer != null || binding.chronometerConnected.visibility == View.VISIBLE
 
     /** DNS and the split-tunnel app list are applied on the WireGuard interface at connect time, so
      *  changing them while already connected has no effect on the running tunnel until the
@@ -389,7 +427,7 @@ class MainActivity : AppCompatActivity() {
             while (true) {
                 val wait = lastRefreshStartedAt + SERVER_REFRESH_INTERVAL_MS - SystemClock.elapsedRealtime()
                 if (wait > 0) delay(wait)
-                refreshServers(showSpinner = false)
+                refreshServers(showSpinner = false, ping = currentTab == Tab.LOCATIONS)
                 delay(1_000) // never a tight loop, even if a refresh was skipped
             }
         }
@@ -403,15 +441,21 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun loadAndPing(warmPrefetch: Deferred<List<Server>>? = null, onDone: (() -> Unit)? = null) {
+    private fun loadAndPing(
+        warmPrefetch: Deferred<List<Server>>? = null,
+        showSpinner: Boolean = true,
+        forceRefresh: Boolean = false,
+        onDone: (() -> Unit)? = null
+    ) {
         lifecycleScope.launch {
-            refreshServers(showSpinner = true, warmPrefetch = warmPrefetch)
+            refreshServers(showSpinner = showSpinner, warmPrefetch = warmPrefetch, forceRefresh = forceRefresh)
             onDone?.invoke()
         }
     }
 
-    /** Fetches the server list, re-pings every server, and re-renders. Used for the
-     *  initial load, pull-to-refresh, and the every-20s background auto-refresh.
+    /** Loads the server list (cache-first, see ServerSource), re-pings every server, and re-renders.
+     *  Used for the initial load, pull-to-refresh, and the every-30s background tick (which in
+     *  practice only re-pings, because the list itself is cached for 24h).
      *
      *  On failure (backend timeout, no connection, etc.) this deliberately leaves
      *  [allServers] as-is instead of clearing it -- previously a failed fetch set
@@ -419,7 +463,12 @@ class MainActivity : AppCompatActivity() {
      *  on any transient hiccup. [showSpinner] also gates whether a failure shows a
      *  toast: on for the visible pull-to-refresh/initial load, off for the silent
      *  background tick so a flaky connection doesn't nag the user every 20 seconds. */
-    private suspend fun refreshServers(showSpinner: Boolean, warmPrefetch: Deferred<List<Server>>? = null) {
+    private suspend fun refreshServers(
+        showSpinner: Boolean,
+        warmPrefetch: Deferred<List<Server>>? = null,
+        forceRefresh: Boolean = false,
+        ping: Boolean = true
+    ) {
         // A silent background tick simply skips if a refresh is already running; a user-initiated
         // one (initial load / pull-to-refresh) waits its turn so the spinner always resolves.
         if (!showSpinner && refreshMutex.isLocked) return
@@ -438,17 +487,23 @@ class MainActivity : AppCompatActivity() {
                 } catch (e: Exception) {
                     null
                 }
-                val servers = prefetched ?: serverSource.getServers()
+                // Served from the 24h disk cache unless it is stale or the user pulled to refresh.
+                val servers = prefetched ?: serverSource.getServers(forceRefresh)
                 // Carry over ping times we already measured so already-known servers
                 // don't flash back to "Checking..." on every refresh.
                 val knownPings = allServers.associate { it.id to it.pingMs }
                 servers.forEach { s -> knownPings[s.id]?.let { s.pingMs = it } }
                 allServers = servers
                 renderRows()
-                val targets = servers.map { Triple(it.id, it.endpointHost, 22) }
-                val results = PingUtil.pingAll(targets)
-                servers.forEach { it.pingMs = results[it.id] ?: -2 }
-                renderRows()
+                // Pinging every server costs battery and data, so the quiet background tick only does
+                // it while the Locations list is actually on screen (see startServerAutoRefresh).
+                if (ping) {
+                    val targets = servers.map { Triple(it.id, it.endpointHost, 22) }
+                    val results = PingUtil.pingAll(targets)
+                    servers.forEach { it.pingMs = results[it.id] ?: -2 }
+                    lastPingAt = SystemClock.elapsedRealtime()
+                    renderRows()
+                }
             }
         } catch (e: CancellationException) {
             throw e // the screen went away -- not an error, and no Toast on a dead Activity
@@ -458,7 +513,28 @@ class MainActivity : AppCompatActivity() {
             }
         } finally {
             if (showSpinner) binding.swipeRefresh.isRefreshing = false
+            initialLoadDone = true
+            if (allServers.isEmpty()) renderRows() // swap "Loading…" for the real empty state
+            updateUpdatedLabel()
         }
+    }
+
+    /** "Updated 3 h ago" under the search box, from the time the cached list was last fetched. */
+    private fun updateUpdatedLabel() {
+        val saved = ServerCache.savedAtMs(this)
+        if (saved == null || allServers.isEmpty()) {
+            binding.textUpdated.visibility = View.GONE
+            return
+        }
+        val age = (System.currentTimeMillis() - saved).coerceAtLeast(0)
+        val text = when {
+            age < 60_000L -> "just now"
+            age < 3_600_000L -> "${age / 60_000L} min ago"
+            age < 86_400_000L -> "${age / 3_600_000L} h ago"
+            else -> "${age / 86_400_000L} d ago"
+        }
+        binding.textUpdated.text = "${allServers.size} servers • updated $text"
+        binding.textUpdated.visibility = View.VISIBLE
     }
 
     private fun renderRows() {
@@ -506,6 +582,10 @@ class MainActivity : AppCompatActivity() {
             else -> {
                 binding.emptyState.visibility = View.VISIBLE
                 when {
+                    !initialLoadDone && allServers.isEmpty() -> {
+                        binding.textEmptyTitle.text = "Loading servers…"
+                        binding.textEmptyBody.text = "Getting the latest locations for you."
+                    }
                     query.isEmpty() && locationFilter == LocationFilter.FAVORITES -> {
                         binding.textEmptyTitle.text = "No favorites yet"
                         binding.textEmptyBody.text = "Tap the star next to a country to add it here."
@@ -871,6 +951,17 @@ class MainActivity : AppCompatActivity() {
         val ringMuted = ContextCompat.getColor(this, R.color.ringMuted)
         val white = ContextCompat.getColor(this, R.color.white)
         val blue = ContextCompat.getColor(this, R.color.primary)
+        // The status card takes on the connection colour so the state reads at a glance.
+        when (uiState()) {
+            UiState.CONNECTED -> {
+                binding.cardProtection.setCardBackgroundColor(ContextCompat.getColor(this, R.color.connectedTint))
+                binding.cardProtection.strokeColor = green
+            }
+            else -> {
+                binding.cardProtection.setCardBackgroundColor(ContextCompat.getColor(this, R.color.cardBackground))
+                binding.cardProtection.strokeColor = ContextCompat.getColor(this, R.color.divider)
+            }
+        }
         when (uiState()) {
             UiState.CONNECTED -> {
                 binding.ringView.ringState = PowerRingView.State.CONNECTED

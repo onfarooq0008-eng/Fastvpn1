@@ -3,12 +3,15 @@ package com.fastvpnn.app.vpn
 import android.content.Context
 import android.util.Log
 import com.fastvpnn.app.data.Server
+import com.fastvpnn.app.util.NotificationHelper
 import com.wireguard.android.backend.GoBackend
 import com.wireguard.android.backend.Tunnel
 import com.wireguard.config.Config
 import com.wireguard.config.Interface
 import com.wireguard.config.Peer
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -77,11 +80,31 @@ class VpnTunnelManager(private val context: Context) {
     // Read from the UI thread, the notification receiver and IO threads.
     @Volatile
     var state: TunnelState = TunnelState.DOWN
-        private set
+        private set(value) {
+            field = value
+            _stateFlow.value = value
+        }
 
-    private class SimpleTunnel(private val tunnelName: String) : Tunnel {
+    private val _stateFlow = MutableStateFlow(TunnelState.DOWN)
+
+    /** Live tunnel state. Lets the open screen react the instant the tunnel goes down from
+     *  somewhere else (the notification's Disconnect button) instead of waiting for a poll. */
+    val stateFlow: StateFlow<TunnelState> = _stateFlow
+
+    private inner class SimpleTunnel(private val tunnelName: String) : Tunnel {
         override fun getName(): String = tunnelName
-        override fun onStateChange(newState: Tunnel.State) { /* observed via manager */ }
+        override fun onStateChange(newState: Tunnel.State) {
+            // GoBackend reports here when the tunnel really goes down, including when the system or
+            // another VPN app takes it away while our app is closed. Without this the "Connected"
+            // notification stayed up until the app was opened again. Only the CURRENT tunnel object
+            // may act on it, so a late DOWN from an old tunnel can't kill a newer connection.
+            if (newState == Tunnel.State.DOWN && this === currentTunnel) {
+                Log.d(TAG, "onStateChange: tunnel went DOWN externally")
+                currentTunnel = null
+                state = TunnelState.DOWN
+                NotificationHelper.clear(context)
+            }
+        }
     }
 
     suspend fun connect(

@@ -28,6 +28,8 @@ import java.net.Socket
  */
 object ConnectivityCheckUtil {
 
+    private val PROBE_HOSTS = listOf("1.1.1.1", "8.8.8.8")
+
     /**
      * ConnectivityManager doesn't necessarily know about a just-established VPN
      * network the instant GoBackend.setState() returns -- there's a short OS-level
@@ -53,11 +55,19 @@ object ConnectivityCheckUtil {
         withContext(Dispatchers.IO) {
             try {
                 val vpnNetwork = findVpnNetwork(context) ?: return@withContext false
-                Socket().use { socket ->
-                    vpnNetwork.bindSocket(socket)
-                    socket.connect(InetSocketAddress("1.1.1.1", 443), timeoutMs)
+                // Two independent probe hosts: one network blocking a single address must not make a
+                // perfectly working server look dead.
+                PROBE_HOSTS.any { host ->
+                    try {
+                        Socket().use { socket ->
+                            vpnNetwork.bindSocket(socket)
+                            socket.connect(InetSocketAddress(host, 443), timeoutMs)
+                        }
+                        true
+                    } catch (e: Exception) {
+                        false
+                    }
                 }
-                true
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
