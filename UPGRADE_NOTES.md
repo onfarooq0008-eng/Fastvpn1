@@ -192,3 +192,13 @@ NOT done / needs you: a real Gradle build and on-device test (see the audit repo
 - New `ads/` package: `AdConfig`, `AdsConsent` (Allow-ads gate, as before), `AdsManager` (init + banner with no-fill retries).
 - Restored: AD_ID permission, `adContainer` above the bottom nav, `USE_TEST_ADS` build flags, `adsAccepted` setting, ad text in privacy/terms, `app-ads.txt` (Organization core ID `18968517092189`).
 - The Settings "Ad choices" row and the long-press ad diagnostics stay removed.
+
+## v1.0.5 (update 5): R8 optimization (Play Console recommendation)
+- `proguard-rules.pro`: removed the blanket `-keep class com.wireguard.** { *; }` and `-keep class com.fastvpnn.app.data.** { *; }` (the cause of the 35% / 36% rates). WireGuard now only keeps GoBackend's JNI native methods; app data classes are not kept (no reflection, JSON parsed by hand). Added `-repackageclasses` and `-allowaccessmodification`.
+- MUST TEST a RELEASE build before publishing: connect + disconnect, switch servers, split tunneling, notification Disconnect, banner ad.
+- If the release build misbehaves only in release (e.g. connect fails), a missing keep rule is the cause -- the crash log (Play Console / logcat) names the class; add a narrow `-keep` for just that class.
+
+## v1.0.5 (update 6): CI workflow upgrade
+- checkout v4→v6, setup-java v4→v5, setup-node v4→v6, upload-artifact v4→v7, setup-gradle v4→v6 (all Node 24; clears the Node 20 / setup-java deprecation warnings).
+- Runner pinned to `ubuntu-24.04` (ubuntu-latest moves to Ubuntu 26 on 2026-10-19). Move to 26 later, after a test run.
+- Fixed the SDK licence step: `sdkmanager` lives 3 levels deep, so the old `-maxdepth 2` found nothing (the "line 16: : command not found" in the log).
