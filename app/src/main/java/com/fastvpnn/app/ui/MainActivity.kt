@@ -84,6 +84,11 @@ class MainActivity : AppCompatActivity() {
     private val refreshMutex = Mutex()
     private var lastRefreshStartedAt = 0L
     private var lastPingAt = 0L
+    // True while a Connect tap waits for the first ping round (list came from cache, nothing measured yet).
+    private var preparingConnect = false
+    // Releasing a backend lease is a network call (up to 15 s). It must never hold up the next
+    // failover attempt, so it runs here, independent of the screen's lifecycle.
+    private val leaseScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
     private var connectingServer: Server? = null
     // False until the first server load has finished, so an empty list reads "Loading…" not "No locations".
     private var initialLoadDone = false
@@ -622,7 +627,34 @@ class MainActivity : AppCompatActivity() {
         if (tunnelManager.state == TunnelState.UP) {
             disconnectFromHome()
         } else {
-            connectToPreferred()
+            ensurePingedThen { connectToPreferred() }
+        }
+    }
+
+    /** The server list now opens instantly from the cache, so a very fast Connect tap can arrive before
+     *  any server has been pinged. Connecting then would pick an unmeasured (possibly dead) server and
+     *  leave the failover chain empty -- the "stuck on Connecting" case. Measure once first (~1-3 s). */
+    private fun ensurePingedThen(action: () -> Unit) {
+        if (preparingConnect) return
+        if (lastPingAt != 0L || allServers.isEmpty()) {
+            action()
+            return
+        }
+        preparingConnect = true
+        updateStatusCard()
+        updateActionButton()
+        lifecycleScope.launch {
+            try {
+                val results = PingUtil.pingAll(allServers.map { Triple(it.id, it.endpointHost, 22) })
+                allServers.forEach { it.pingMs = results[it.id] ?: -2 }
+                lastPingAt = SystemClock.elapsedRealtime()
+                renderRows()
+            } finally {
+                preparingConnect = false
+                updateStatusCard()
+                updateActionButton()
+            }
+            action()
         }
     }
 
@@ -681,7 +713,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun onServerTapped(server: Server) {
-        if (tunnelManager.state == TunnelState.CONNECTING || connectionFlowActive || disconnectInProgress) return
+        if (tunnelManager.state == TunnelState.CONNECTING || connectionFlowActive || disconnectInProgress || preparingConnect) return
         if (tunnelManager.state == TunnelState.UP) {
             if (connectedServer?.id == server.id) {
                 // Tapping the server you're already on disconnects.
@@ -820,7 +852,7 @@ class MainActivity : AppCompatActivity() {
                     assignedAddressCidr = reg.assignedAddressCidr
                 )
                 if (result.isFailure) {
-                    releaseRegistrationLease(reg.serverId, reg.token)
+                    releaseLeaseInBackground(reg.serverId, reg.token)
                     tryNextOrFail(chain, attemptIndex, "Connection failed: ${result.exceptionOrNull()?.message}")
                     return@launch
                 }
@@ -830,7 +862,7 @@ class MainActivity : AppCompatActivity() {
                 val working = ConnectivityCheckUtil.verifyInternetThroughVpnWithRetries(this@MainActivity)
                 if (!working) {
                     tunnelManager.disconnect()
-                    releaseRegistrationLease(reg.serverId, reg.token)
+                    releaseLeaseInBackground(reg.serverId, reg.token)
                     tryNextOrFail(chain, attemptIndex, null)
                     return@launch
                 }
@@ -865,10 +897,14 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 // Anything unexpected (key store failure, malformed config...) must end as a normal
                 // failed attempt, never as an uncaught exception that kills the app.
-                registration?.let { releaseRegistrationLease(it.serverId, it.token) }
+                registration?.let { releaseLeaseInBackground(it.serverId, it.token) }
                 tryNextOrFail(chain, attemptIndex, "Connection failed: ${e.message}")
             }
         }
+    }
+
+    private fun releaseLeaseInBackground(serverId: String?, token: String?) {
+        leaseScope.launch { releaseRegistrationLease(serverId, token) }
     }
 
     private suspend fun releaseRegistrationLease(serverId: String?, token: String?) {
@@ -899,8 +935,13 @@ class MainActivity : AppCompatActivity() {
     private suspend fun cleanupStaleRegistrationLeases() {
         // If the VPN is down, no registration lease should remain active.
         val (active, pending) = withContext(Dispatchers.IO) { keyStore.activeRegistration() to keyStore.pendingRegistrations() }
+        // A Connect tap can start while this runs; its brand-new lease would be released under it.
+        if (connectionFlowActive || preparingConnect) return
         active?.let { releaseRegistrationLease(it.serverId, it.token) }
-        pending.forEach { releaseRegistrationLease(it.serverId, it.token) }
+        for (lease in pending) {
+            if (connectionFlowActive || preparingConnect) return
+            releaseRegistrationLease(lease.serverId, lease.token)
+        }
     }
 
     private fun restoreConnectedServerFromSettings() {
@@ -938,7 +979,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun uiState(): UiState = when {
-        tunnelManager.state == TunnelState.CONNECTING || connectionFlowActive -> UiState.CONNECTING
+        tunnelManager.state == TunnelState.CONNECTING || connectionFlowActive || preparingConnect -> UiState.CONNECTING
         tunnelManager.state == TunnelState.UP -> UiState.CONNECTED
         else -> UiState.DISCONNECTED
     }

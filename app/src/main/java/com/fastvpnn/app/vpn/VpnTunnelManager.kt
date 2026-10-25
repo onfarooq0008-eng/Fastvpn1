@@ -168,6 +168,9 @@ class VpnTunnelManager(private val context: Context) {
             state = TunnelState.DOWN
             Log.e(TAG, "connect: failed", e)
             Result.failure(e)
+        } finally {
+            // Whatever happened (even an Error that skipped the catch), never leave "Connecting" stuck.
+            if (state == TunnelState.CONNECTING) state = TunnelState.DOWN
         }
         }
     }
@@ -210,6 +213,9 @@ class VpnTunnelManager(private val context: Context) {
      * should report that correctly since there is no real tunnel left to find.
      */
     fun syncStateFromBackend(): TunnelState {
+        // A connect is in flight: the tunnel is legitimately "not running yet". Reporting DOWN here
+        // (and clearing the handle) used to let a refresh/resume race corrupt a connect in progress.
+        if (state == TunnelState.CONNECTING) return state
         return try {
             val running = backend.getRunningTunnelNames().contains(TUNNEL_NAME)
             state = if (running) {

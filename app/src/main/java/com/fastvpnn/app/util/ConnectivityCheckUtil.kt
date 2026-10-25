@@ -61,7 +61,7 @@ object ConnectivityCheckUtil {
                     try {
                         Socket().use { socket ->
                             vpnNetwork.bindSocket(socket)
-                            socket.connect(InetSocketAddress(host, 443), timeoutMs)
+                            socket.connect(InetSocketAddress(host, 443), (timeoutMs / PROBE_HOSTS.size).coerceAtLeast(1_000))
                         }
                         true
                     } catch (e: Exception) {
