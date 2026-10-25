@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.FastVPN" parent="Theme.FastVPN.Base">
+        <item name="android:windowLightNavigationBar">@bool/light_bars</item>
+    </style>
+</resources>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Release/default network security policy. Android already blocks cleartext
+     traffic by default for apps targeting API 28+ (see the debug variant's
+     config for why the debug build needs a deliberate exception instead);
+     this makes that default explicit and gives a concrete anchor to add
+     certificate pinning for the backend domain later, if desired. Pinning
+     isn't set up yet: it requires the backend's actual certificate/SPKI hash,
+     generated from the live server, not guessed here. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

@@ -1,0 +1,6 @@
+# app-ads.txt for fastvpnn.pp.ua
+# This file must be served from the root of the website domain that is set as the "Website" on the
+# Google Play listing (https://fastvpnn.pp.ua/app-ads.txt). Ad networks only bid on apps whose
+# app-ads.txt authorises them, so without this line there is little or no ad fill.
+# Unity Ads: Organization core ID from the Unity Dashboard ("Complete app integration" screen).
+unity.com, 18968517092189, DIRECT, 96cabb5fbdde37a7

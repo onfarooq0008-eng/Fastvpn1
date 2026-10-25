@@ -1,0 +1,15 @@
+{
+  "name": "fastvpn-agent",
+  "version": "1.0.0",
+  "description": "Runs on each VPS; adds WireGuard peers on command from the FastVPN control API.",
+  "main": "agent.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node agent.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
