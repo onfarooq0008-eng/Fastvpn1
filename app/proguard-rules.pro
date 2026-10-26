@@ -35,3 +35,29 @@
 # Unity Ads is excluded from the build (see app/build.gradle), but the all-in-one Yandex mediation bundle may still
 # reference its classes from an unused adapter. Never loaded at runtime; this only silences the R8 warning.
 -dontwarn com.unity3d.**
+
+# Yandex Mediation partner adapters (all-in-one bundle): they reference optional classes of networks that are
+# not always present. Missing optional classes must not fail the R8 release / bundle build.
+-dontwarn com.yandex.mobile.ads.mediation.**
+-dontwarn com.applovin.**
+-dontwarn com.google.android.gms.ads.**
+-dontwarn com.startapp.**
+-dontwarn com.ironsource.**
+-dontwarn com.unity3d.**
+-dontwarn com.pangle.**
+-dontwarn com.bytedance.**
+-dontwarn com.bigosdk.**
+-dontwarn sg.bigo.**
+-dontwarn com.moloco.**
+-dontwarn io.github.maticooads.**
+-dontwarn com.mbridge.**
+-dontwarn com.chartboost.**
+-dontwarn com.tapjoy.**
+-dontwarn com.vungle.**
+-dontwarn com.my.target.**
+-dontwarn com.inmobi.**
+-dontwarn com.fyber.**
+-dontwarn org.chromium.**
+-dontwarn javax.lang.model.**
+-dontwarn com.google.errorprone.annotations.**
+-dontwarn org.checkerframework.**
