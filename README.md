@@ -9,7 +9,7 @@ yourself, with:
 - **Automatic device registration** via a backend API baked into the app
   itself — every user who installs the app gets your servers automatically,
   zero setup on their end. See `/backend`.
-- **100% free, ad-supported** — no paywall, one Unity banner ad
+- **100% free, ad-supported** — no paywall, one banner ad (Yandex Ads, with AdMob and Start.io as partners)
 - **Search**, **dark mode**, **split tunneling**, a **connection timer + data
   usage** counter, and a **persistent notification with a one-tap Disconnect
   button** while connected
@@ -77,15 +77,25 @@ of the app uses it automatically, no per-device setup needed by anyone.
 
 ---
 
-## 4. Ads (Unity Ads, banner only)
+## 4. Ads (Yandex Mobile Ads + AdMob + Start.io, banner only)
 
-One Unity banner above the bottom navigation bar on the Home screen. No interstitial, native or rewarded ads.
+Served by the Yandex Mobile Ads SDK 8: a **banner** above the bottom navigation bar, a **native** ad card on the Home screen
+and another inside the Locations list (after the first two countries), and an **interstitial** shown right after the user taps
+Disconnect (at most once a minute). Google AdMob and
+Start.io are **mediation partners inside Yandex** (Yandex Mediation): you connect them in the Yandex dashboard. The app
+ships the all-in-one `mobileads-mediation` bundle, so any network you add to the ad unit later (AppLovin, Mintegral, Pangle,
+Chartboost, InMobi, Liftoff, ...) works without an app update. No rewarded ads. Unity Ads is not part of the app.
 
-1. IDs live in `app/src/main/java/com/fastvpnn/app/ads/AdConfig.kt` (Game ID `800391481`, placement `BP_Banner_Android`).
-2. Debug builds always use Unity test mode; release builds show real ads. To ship a release that shows only test ads, set `USE_TEST_ADS` to `"true"` in the release block of `app/build.gradle`.
-3. The user must tap **Allow** on the ad dialog (`ads/AdsConsent.kt`) before Unity starts and before any ad is requested.
-4. `backend/api/public/app-ads.txt` holds Unity's line (Organization core ID); redeploy the backend after changing it.
-5. Play Console: Ads declaration = "Yes, contains ads"; Data safety must list the advertising ID (shared with Unity).
+1. Ad unit IDs live in `app/src/main/java/com/fastvpnn/app/ads/AdConfig.kt` (banner `R-M-20279211-1`, native `R-M-20279211-2`,
+   interstitial `R-M-20279211-3`). In the Yandex dashboard add AdMob, Start.io (or any network) to each ad unit as mediation.
+2. AdMob: paste your AdMob App ID into `admobAppId` (same file). The default is Google's public sample ID, so the app
+   starts but earns nothing until you replace it.
+3. Debug builds always use Yandex's demo banner. To ship a release that shows only demo ads, set `USE_TEST_ADS` to `"true"`
+   in the release block of `app/build.gradle`.
+4. The SDK's automatic start is disabled in the manifest. The user must tap **Allow** on the ad dialog (`ads/AdsConsent.kt`);
+   only then does `AdsManager.init` start the SDK and pass the consent on to the partner networks.
+5. `backend/api/public/app-ads.txt`: paste the lines from the Yandex, AdMob and Start.io dashboards; redeploy the backend.
+6. Play Console: Ads declaration = "Yes, contains ads"; Data safety must list the advertising ID (shared with Yandex, Google and Start.io).
 
 ---
 
@@ -122,7 +132,7 @@ Tell me when you're ready and I'll write the exact Caddy config for your domain.
 
 ## 6. Monetization
 
-No paywall, no subscriptions — every server is free, and the only ad is one Unity banner.
+No paywall, no subscriptions — every server is free, and the only ad is one banner (Yandex Ads).
 
 ---
 

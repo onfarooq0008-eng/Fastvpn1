@@ -347,6 +347,14 @@
                     </LinearLayout>
                 </LinearLayout>
 
+                <!-- Native ad (Home). Hidden until an ad has loaded; filled by MainActivity.attachHomeNative(). -->
+                <FrameLayout
+                    android:id="@+id/nativeHomeContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:visibility="gone" />
+
                 <LinearLayout
                     android:id="@+id/bannerPremium"
                     android:layout_width="match_parent"

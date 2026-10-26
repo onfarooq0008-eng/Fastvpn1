@@ -31,3 +31,7 @@
     public static int v(...);
     public static int d(...);
 }
+
+# Unity Ads is excluded from the build (see app/build.gradle), but the all-in-one Yandex mediation bundle may still
+# reference its classes from an unused adapter. Never loaded at runtime; this only silences the R8 warning.
+-dontwarn com.unity3d.**

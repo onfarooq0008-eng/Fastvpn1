@@ -10,7 +10,7 @@ class FastVpnApp : Application() {
         super.onCreate()
         applyThemeMode()
         // Ads must not load before the user has accepted the consent screen (ConsentActivity). Returning
-        // users get Unity started here; first-run users get it from ConsentActivity's "I Agree" button.
+        // users get the ad SDK started here; first-run users get it from ConsentActivity's "I Agree" button.
         // init() itself also waits for the user's "Allow ads" answer.
         if (AppSettings(this).hasAcceptedTerms) AdsManager.init(this)
     }

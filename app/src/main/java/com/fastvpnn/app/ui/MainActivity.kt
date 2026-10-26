@@ -25,6 +25,7 @@ import com.fastvpnn.app.BuildConfig
 import com.fastvpnn.app.R
 import com.fastvpnn.app.ads.AdsConsent
 import com.fastvpnn.app.ads.AdsManager
+import com.fastvpnn.app.ads.NativeAdSlot
 import com.fastvpnn.app.data.AppSettings
 import com.fastvpnn.app.data.Server
 import com.fastvpnn.app.data.ServerCache
@@ -84,6 +85,9 @@ class MainActivity : AppCompatActivity() {
     private val refreshMutex = Mutex()
     private var lastRefreshStartedAt = 0L
     private var lastPingAt = 0L
+    // Native ads: one for the Home screen, one inside the Locations list (a native ad can only be shown in one place).
+    private lateinit var nativeHome: NativeAdSlot
+    private lateinit var nativeLocations: NativeAdSlot
     // True while a Connect tap waits for the first ping round (list came from cache, nothing measured yet).
     private var preparingConnect = false
     // Releasing a backend lease is a network call (up to 15 s). It must never hold up the next
@@ -142,6 +146,9 @@ class MainActivity : AppCompatActivity() {
         // Warm the key store in the background so the first Connect tap doesn't pay for it.
         lifecycleScope.launch(Dispatchers.IO) { runCatching { keyStore } }
 
+        nativeHome = NativeAdSlot(this) { attachHomeNative() }
+        nativeLocations = NativeAdSlot(this) { renderRows() }
+
         binding.recyclerServers.layoutManager = LinearLayoutManager(this)
         (binding.recyclerServers.itemAnimator as? SimpleItemAnimator)?.supportsChangeAnimations = false
         adapter = HomeListAdapter(
@@ -152,7 +159,8 @@ class MainActivity : AppCompatActivity() {
                 onServerTapped(server)
             },
             onFavoriteClick = { group -> onFavoriteTapped(group) },
-            onFastestClick = { onFastestSelected() }
+            onFastestClick = { onFastestSelected() },
+            nativeSlot = nativeLocations
         )
         binding.recyclerServers.adapter = adapter
 
@@ -192,6 +200,9 @@ class MainActivity : AppCompatActivity() {
         // Idempotent: first-run users reach here without FastVpnApp having started ads yet.
         AdsManager.init(application)
         AdsManager.showBanner(this, binding.adContainer)
+        // Native ads start loading once the SDK is up (i.e. after the user allowed ads).
+        nativeHome.start()
+        nativeLocations.start()
         // Ads are required to use the app: ask until the user allows them (also after rotation / process restart).
         if (AdsConsent.needsPrompt(this)) AdsConsent.showDialog(this)
 
@@ -326,6 +337,8 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         AdsManager.hideBanner(binding.adContainer)
+        nativeHome.destroy()
+        nativeLocations.destroy()
     }
 
     override fun onPause() {
@@ -405,7 +418,12 @@ class MainActivity : AppCompatActivity() {
 
     /** Tears the tunnel down and updates the UI. On failure it shows [failureMessage], re-reads the
      *  real tunnel state so the button never lies, and returns false. */
-    private suspend fun disconnectTunnel(failureMessage: String): Boolean {
+    private fun attachHomeNative() {
+        nativeHome.attachTo(binding.nativeHomeContainer)
+        binding.nativeHomeContainer.visibility = if (nativeHome.isReady) View.VISIBLE else View.GONE
+    }
+
+    private suspend fun disconnectTunnel(failureMessage: String, showAd: Boolean = false): Boolean {
         val result = tunnelManager.disconnect()
         if (result.isFailure) {
             tunnelManager.syncStateFromBackend()
@@ -417,6 +435,8 @@ class MainActivity : AppCompatActivity() {
             return false
         }
         onDisconnected() // UI first -- releasing the backend lease below can take a network round trip
+        // The user tapped Disconnect themselves: this is the moment for the interstitial (rate-limited inside AdsManager).
+        if (showAd) AdsManager.showInterstitial(this)
         releaseActiveRegistrationLease()
         return true
     }
@@ -580,6 +600,10 @@ class MainActivity : AppCompatActivity() {
                 group.servers.forEach { rows.add(HomeRow.ServerRow(it)) }
             }
         }
+        // The Locations native ad sits after the first two countries of the plain list (not while searching/filtering).
+        if (locationFilter == LocationFilter.ALL && query.isEmpty() && nativeLocations.isReady && rows.size >= 3) {
+            rows.add(3.coerceAtMost(rows.size), HomeRow.AdRow)
+        }
         adapter.submit(rows, connectedId, favorites, appSettings.fastestServerMode)
 
         when {
@@ -668,7 +692,7 @@ class MainActivity : AppCompatActivity() {
         updateActionButton()
         lifecycleScope.launch {
             try {
-                disconnectTunnel("Could not disconnect VPN")
+                disconnectTunnel("Could not disconnect VPN", showAd = true)
             } finally {
                 disconnectInProgress = false
                 updateActionButton()

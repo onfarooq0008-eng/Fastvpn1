@@ -7,4 +7,6 @@ sealed class HomeRow {
     object FastestRow : HomeRow()
     data class Header(val group: CountryGroup, val expanded: Boolean) : HomeRow()
     data class ServerRow(val server: Server) : HomeRow()
+    /** The native ad card inside the Locations list (only present while an ad is loaded). */
+    object AdRow : HomeRow()
 }

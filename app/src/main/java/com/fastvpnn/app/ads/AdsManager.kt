@@ -2,32 +2,41 @@ package com.fastvpnn.app.ads
 
 import android.app.Activity
 import android.app.Application
+import android.content.Context
 import android.os.Handler
 import android.os.Looper
-import android.content.Context
 import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.Toast
-import com.unity3d.ads.IUnityAdsInitializationListener
-import com.unity3d.ads.UnityAds
-import com.unity3d.ads.metadata.MetaData
-import com.unity3d.services.banners.BannerErrorInfo
-import com.unity3d.services.banners.BannerView
-import com.unity3d.services.banners.UnityBannerSize
+import com.yandex.mobile.ads.banner.BannerAdEventListener
+import com.yandex.mobile.ads.banner.BannerAdSize
+import com.yandex.mobile.ads.banner.BannerAdView
+import com.yandex.mobile.ads.common.AdError
+import com.yandex.mobile.ads.common.AdRequest
+import com.yandex.mobile.ads.common.AdRequestError
+import com.yandex.mobile.ads.common.ImpressionData
+import com.yandex.mobile.ads.common.YandexAds
+import com.yandex.mobile.ads.interstitial.InterstitialAd
+import com.yandex.mobile.ads.interstitial.InterstitialAdEventListener
+import com.yandex.mobile.ads.interstitial.InterstitialAdLoadListener
+import com.yandex.mobile.ads.interstitial.InterstitialAdLoader
 import java.lang.ref.WeakReference
 
 /**
- * The only ad entry point: ONE Unity banner.
+ * The ad entry point: Yandex banner + disconnect interstitial (native ads live in [NativeAdSlot]). Google AdMob, Start.io
+ * and the other networks are mediation partners behind Yandex, configured in the Yandex dashboard.
  *
- *   AdsManager.init(app)                    -- safe to call repeatedly; starts Unity once the user has allowed ads
+ *   AdsManager.init(app)                    -- safe to call repeatedly; starts the SDK once the user has allowed ads
  *   AdsManager.showBanner(activity, view)   -- view stays hidden until an ad has really loaded
  *   AdsManager.hideBanner(view)             -- call from onDestroy
+ *   AdsManager.showInterstitial(activity)   -- call right after a user-initiated disconnect (rate-limited, no-op if no ad is ready)
+ *   AdsManager.whenReady(runnable)          -- runs once the SDK is up (used by native ad slots)
  *
- * Uses Unity's BannerView API (still shipped in SDK 4.21, marked deprecated since 4.19). Everything runs on
- * the main thread and nothing here can throw into UI code.
+ * The SDK's own automatic start is switched off in the manifest, so nothing from Yandex, AdMob or Start.io
+ * runs before the user has said yes. Everything here runs on the main thread and nothing can throw into UI code.
  */
 object AdsManager {
 
@@ -42,11 +51,36 @@ object AdsManager {
 
     private var request: Request? = null
     private var token = 0
-    private var banner: BannerView? = null
+    private var banner: BannerAdView? = null
     private var loading = false
     private var active = false
     private var retries = 0
     private var retryQueued = false
+
+    // ---- interstitial ----
+    private var appContext: Application? = null
+    private var interstitialLoader: InterstitialAdLoader? = null // strong reference, as Yandex requires
+    private var interstitial: InterstitialAd? = null
+    private var shownInterstitial: InterstitialAd? = null
+    private var interstitialLoading = false
+    private var interstitialRetries = 0
+    private var lastInterstitialShownAt = 0L
+
+    // ---- "SDK is ready" callbacks ----
+    private val readyListeners = mutableListOf<Runnable>()
+
+    /** Runs [r] on the main thread once the SDK is initialised (now, if it already is). */
+    fun whenReady(r: Runnable) {
+        if (state == State.READY) {
+            r.run()
+        } else if (!readyListeners.contains(r)) {
+            readyListeners.add(r)
+        }
+    }
+
+    fun removeReadyListener(r: Runnable) {
+        readyListeners.remove(r)
+    }
 
     /** In debug / test-ads builds, tell the developer WHY an ad is missing (no logcat needed). Never shown to real users. */
     private fun debugToast(context: Context, message: String) {
@@ -55,32 +89,103 @@ object AdsManager {
 
     // ============================ init ============================
 
-    /** Does nothing until the user has allowed ads (see AdsConsent). Never blocks: Unity initialises asynchronously. */
+    /** Does nothing until the user has allowed ads (see AdsConsent). Never blocks: the SDK starts asynchronously. */
     fun init(app: Application) {
         if (state != State.NOT_STARTED || !AdsConsent.isAccepted(app)) return
         state = State.INITIALIZING
+        appContext = app
         try {
-            // The user allowed ads in the consent dialog.
-            MetaData(app).apply { set("gdpr.consent", true); commit() }
-            MetaData(app).apply { set("privacy.consent", true); commit() }
-            UnityAds.initialize(app, AdConfig.GAME_ID, AdConfig.isTestMode, object : IUnityAdsInitializationListener {
-                override fun onInitializationComplete() {
-                    state = State.READY
-                    Log.i(TAG, "Unity initialized (test=${AdConfig.isTestMode})")
-                    request?.let { if (!active && !loading && !retryQueued) tryLoad(it.token) }
-                }
-
-                override fun onInitializationFailed(error: UnityAds.UnityAdsInitializationError?, message: String?) {
-                    state = State.FAILED
-                    Log.w(TAG, "Unity init failed: $error $message")
-                    debugToast(app, "Unity init failed: $error $message")
-                }
-            })
+            // The user allowed ads in the consent dialog. Must be set BEFORE initialize(); Yandex hands it on to
+            // the mediation partners (AdMob, Start.io -- Start.io then skips its own consent pop-up).
+            YandexAds.setUserConsent(true)
+            YandexAds.initialize(app) {
+                state = State.READY
+                Log.i(TAG, "Yandex Ads initialized (test=${AdConfig.isTestMode})")
+                request?.let { if (!active && !loading && !retryQueued) tryLoad(it.token) }
+                loadInterstitial()
+                readyListeners.toList().also { readyListeners.clear() }.forEach { it.run() }
+            }
         } catch (t: Throwable) {
             state = State.FAILED
-            Log.w(TAG, "Unity init crashed: ${t.javaClass.simpleName}")
-            debugToast(app, "Unity init crashed: ${t.javaClass.simpleName}")
+            Log.w(TAG, "Yandex Ads init crashed: ${t.javaClass.simpleName}")
+            debugToast(app, "init crashed: ${t.javaClass.simpleName}")
         }
+    }
+
+    // ============================ interstitial ============================
+
+    private fun loadInterstitial() {
+        val app = appContext ?: return
+        if (state != State.READY || interstitialLoading || interstitial != null) return
+        interstitialLoading = true
+        try {
+            val loader = interstitialLoader ?: InterstitialAdLoader(app).also { interstitialLoader = it }
+            loader.loadAd(
+                AdRequest.Builder(AdConfig.interstitialAdUnitId).build(),
+                object : InterstitialAdLoadListener {
+                    override fun onAdLoaded(interstitialAd: InterstitialAd) {
+                        interstitialLoading = false
+                        interstitialRetries = 0
+                        interstitial = interstitialAd
+                        Log.i(TAG, "interstitial loaded")
+                    }
+
+                    override fun onAdFailedToLoad(adRequestError: AdRequestError) {
+                        interstitialLoading = false
+                        Log.i(TAG, "interstitial failed: code=${adRequestError.code} msg=${adRequestError.description}")
+                        // Never reload straight from this callback (Yandex discourages it): retry later, a few times.
+                        if (interstitialRetries < AdConfig.RETRY_MAX_TRIES) {
+                            val delay = AdConfig.RETRY_BASE_MS shl interstitialRetries
+                            interstitialRetries++
+                            main.postDelayed({ loadInterstitial() }, delay)
+                        }
+                    }
+                }
+            )
+        } catch (t: Throwable) {
+            interstitialLoading = false
+            Log.w(TAG, "interstitial crashed: ${t.javaClass.simpleName}")
+        }
+    }
+
+    /** Shows the preloaded interstitial, if there is one and the last one was long enough ago. Never blocks, never throws. */
+    fun showInterstitial(activity: Activity) {
+        if (state != State.READY || activity.isFinishing || activity.isDestroyed) return
+        val ad = interstitial
+        if (ad == null) {
+            loadInterstitial() // not ready yet: try to have one for next time
+            return
+        }
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (lastInterstitialShownAt != 0L && now - lastInterstitialShownAt < AdConfig.INTERSTITIAL_MIN_INTERVAL_MS) return
+        try {
+            interstitial = null
+            shownInterstitial = ad
+            ad.setAdEventListener(object : InterstitialAdEventListener {
+                override fun onAdShown() {}
+
+                override fun onAdFailedToShow(adError: AdError) {
+                    Log.i(TAG, "interstitial failed to show: ${adError.description}")
+                    finishInterstitial(ad)
+                }
+
+                override fun onAdDismissed() = finishInterstitial(ad)
+                override fun onAdClicked() {}
+                override fun onAdImpression(impressionData: ImpressionData?) {}
+            })
+            lastInterstitialShownAt = now
+            ad.show(activity)
+        } catch (t: Throwable) {
+            Log.w(TAG, "interstitial show crashed: ${t.javaClass.simpleName}")
+            finishInterstitial(ad)
+        }
+    }
+
+    /** After an interstitial is dismissed (or failed to show): release it, as Yandex asks, and preload the next one. */
+    private fun finishInterstitial(ad: InterstitialAd) {
+        try { ad.setAdEventListener(null) } catch (_: Throwable) {}
+        if (shownInterstitial === ad) shownInterstitial = null
+        loadInterstitial()
     }
 
     // ============================ banner ============================
@@ -114,18 +219,26 @@ object AdsManager {
         val activity = req.activity.get()
         val container = req.container.get()
         if (activity == null || container == null || activity.isFinishing || activity.isDestroyed) return
-        if (state != State.READY) return // loaded from onInitializationComplete once Unity is up
+        if (state != State.READY) return // loaded from the init callback once the SDK is up
         loading = true
         // The banner is a web view: it must be laid out to load, so the container is INVISIBLE (kept in
         // layout) while loading -- not GONE. It becomes VISIBLE on success and GONE on failure.
         container.visibility = View.INVISIBLE
         try {
-            val view = BannerView(activity, AdConfig.BANNER_PLACEMENT_ID, UnityBannerSize(320, 50))
+            val view = BannerAdView(activity)
             banner = view
-            var reported = false // Unity refreshes banners itself and can call onBannerLoaded repeatedly
-            view.listener = object : BannerView.IListener {
-                override fun onBannerLoaded(bannerAdView: BannerView?) {
-                    if (reported || req.token != token) return
+            // Adaptive sticky banner as wide as the screen.
+            val widthDp = (activity.resources.displayMetrics.widthPixels / activity.resources.displayMetrics.density).toInt()
+            view.setAdSize(BannerAdSize.sticky(activity, widthDp))
+            var reported = false // the SDK can refresh banners itself and call onAdLoaded repeatedly
+            view.setBannerAdEventListener(object : BannerAdEventListener {
+                override fun onAdLoaded() {
+                    if (req.token != token) {
+                        // The screen moved on while this loaded: release it instead of leaking it.
+                        try { view.destroy() } catch (_: Throwable) {}
+                        return
+                    }
+                    if (reported) return
                     reported = true
                     loading = false
                     active = true
@@ -133,9 +246,9 @@ object AdsManager {
                     Log.i(TAG, "banner loaded")
                 }
 
-                override fun onBannerFailedToLoad(bannerAdView: BannerView?, errorInfo: BannerErrorInfo?) {
-                    Log.i(TAG, "banner failed: code=${errorInfo?.errorCode} msg=${errorInfo?.errorMessage}")
-                    debugToast(activity, "banner failed: ${errorInfo?.errorCode} ${errorInfo?.errorMessage}")
+                override fun onAdFailedToLoad(adRequestError: AdRequestError) {
+                    Log.i(TAG, "banner failed: code=${adRequestError.code} msg=${adRequestError.description}")
+                    debugToast(activity, "banner failed: ${adRequestError.code} ${adRequestError.description}")
                     if (reported || req.token != token) return // a later refresh failing keeps the last ad on screen
                     reported = true
                     loading = false
@@ -146,17 +259,15 @@ object AdsManager {
                     scheduleRetry(forToken)
                 }
 
-                // Required since Unity Ads 4.21 (the interface gained this callback).
-                override fun onBannerShown(bannerAdView: BannerView?) {}
-                override fun onBannerClick(bannerAdView: BannerView?) {}
-                override fun onBannerLeftApplication(bannerAdView: BannerView?) {}
-            }
+                override fun onAdClicked() {}
+                override fun onImpression(impressionData: ImpressionData?) {}
+            })
             container.removeAllViews()
             container.addView(
                 view,
                 FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL)
             )
-            view.load()
+            view.loadAd(AdRequest.Builder(AdConfig.bannerAdUnitId).build())
         } catch (t: Throwable) {
             loading = false
             Log.w(TAG, "banner crashed: ${t.javaClass.simpleName}")
@@ -166,7 +277,8 @@ object AdsManager {
         }
     }
 
-    /** "No fill" is common for new apps. Ask again later, a few times, never in a tight loop. */
+    /** "No fill" is common for new apps. Ask again later (never straight from the failure callback, which Yandex
+     *  discourages), a few times, with a growing delay -- never in a tight loop. */
     private fun scheduleRetry(forToken: Int) {
         if (retries >= AdConfig.RETRY_MAX_TRIES) return
         val delay = AdConfig.RETRY_BASE_MS shl retries

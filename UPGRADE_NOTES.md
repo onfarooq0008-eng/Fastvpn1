@@ -3,6 +3,22 @@
 (Earlier rounds: AGP 9.0.1 / Gradle 9.1, new dark+light UI, Fastest Server button, full-green signal bars,
 Play Store links, light/dark toggle, new website.)
 
+## v1.0.6: Unity Ads removed, Yandex Mobile Ads added (latest change, read this first)
+- Removed: `com.unity3d.ads:unity-ads`, every Unity class/import, the Unity Game ID / placement IDs, the Unity privacy text and
+  the Unity line in `app-ads.txt`. Nothing Unity is left in the app or its dependencies.
+- Added: Yandex Mobile Ads SDK via the all-in-one `com.yandex.android:mobileads-mediation:8.6.0.0` (all partner adapters, incl. Google
+  AdMob and Start.io). One adaptive sticky banner, same place as before. The partner Maven repositories are in `settings.gradle`.
+- That bundle contains a Unity Ads adapter, so `app/build.gradle` excludes group `com.unity3d.ads` and the Unity adapter module
+  (`-dontwarn com.unity3d.**` in ProGuard). Check `./gradlew :app:dependencies | grep -i unity` prints nothing after the first build.
+- Ad formats: banner `R-M-20279211-1` (bottom bar), native `R-M-20279211-2` (Home card + one row in the Locations list, via
+  `ads/NativeAdSlot.kt`, layout `view_native_ad.xml`), interstitial `R-M-20279211-3` (after a user-initiated Disconnect only, max once per
+  60 s, `AdsManager.showInterstitial`). Debug builds use Yandex demo units.
+- Adding a network later: do it in the Yandex dashboard. Some networks also want an App ID in the manifest (AdMob already has its own).
+- You must set: `admobAppId` in `app/build.gradle` (ad unit IDs are in `ads/AdConfig.kt`), add AdMob + Start.io to the ad units in the Yandex
+  dashboard, and fill `app-ads.txt`. Defaults are demo/sample IDs that start fine but earn nothing.
+- Not compiled here (no Android SDK / Maven access in the authoring environment): the first CI build is the real test. If it
+  fails, the Yandex calls are all in `ads/AdsManager.kt` (class names taken from Yandex's SDK 8 docs and changelog).
+
 ## Ads: Meta Audience Network + Unity Ads
 
 ### What the project looked like before

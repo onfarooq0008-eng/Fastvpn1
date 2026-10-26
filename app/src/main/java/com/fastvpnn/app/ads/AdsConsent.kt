@@ -10,7 +10,7 @@ import com.fastvpnn.app.data.AppSettings
 
 /**
  * Ad gate. FastVPN is free because of ads, so the app asks whether ads are allowed:
- *   Allow       -> the Unity banner starts and the app can be used.
+ *   Allow       -> the ad SDK (Yandex, with its AdMob / Start.io partners) starts and the app can be used.
  *   Don't allow -> a second dialog explains the app cannot be used without ads: "Allow ads" or "Exit app".
  * Nothing in the app runs behind the dialog (it cannot be cancelled), and it is shown again on every launch
  * until the user has allowed ads.
@@ -24,8 +24,8 @@ object AdsConsent {
     /** Shows the ad dialog. [onDone] runs after the user has allowed ads. */
     fun showDialog(activity: Activity, onDone: () -> Unit = {}) {
         if (activity.isFinishing || activity.isDestroyed) return
-        val message = "FastVPN is free and supported by a banner ad from Unity Ads. Ads are required to use the app.\n\n" +
-            "Allow ads? Unity may use your device's advertising ID to show ads that fit your interests.\n\n" +
+        val message = "FastVPN is free and supported by a banner ad served by Yandex Ads and its advertising partners (Google AdMob, Start.io). Ads are required to use the app.\n\n" +
+            "Allow ads? These networks may use your device's advertising ID to show ads that fit your interests.\n\n" +
             "If you choose \u201cDon\u2019t allow\u201d, you will not be able to use the app."
         val dialog = AlertDialog.Builder(activity)
             .setTitle("Allow ads")

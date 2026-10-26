@@ -15,12 +15,14 @@ import com.fastvpnn.app.databinding.ItemServerBinding
 private const val VIEW_TYPE_HEADER = 0
 private const val VIEW_TYPE_SERVER = 1
 private const val VIEW_TYPE_FASTEST = 3
+private const val VIEW_TYPE_AD = 4
 
 class HomeListAdapter(
     private val onHeaderClick: (CountryGroup) -> Unit,
     private val onServerClick: (Server) -> Unit,
     private val onFavoriteClick: (CountryGroup) -> Unit,
-    private val onFastestClick: () -> Unit
+    private val onFastestClick: () -> Unit,
+    private val nativeSlot: com.fastvpnn.app.ads.NativeAdSlot? = null
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     private val items = mutableListOf<HomeRow>()
@@ -67,24 +69,28 @@ class HomeListAdapter(
             "S|${s.id}|${s.name}|${s.countryName}|${s.city}|${s.pingMs}|${connectedServerId == s.id}"
         }
         is HomeRow.FastestRow -> "F|$fastestSelected"
+        is HomeRow.AdRow -> "A|${nativeSlot?.isReady}"
     }
 
     private fun rowKey(row: HomeRow): Any = when (row) {
         is HomeRow.Header -> "header_${row.group.countryCode}"
         is HomeRow.ServerRow -> "server_${row.server.id}"
         is HomeRow.FastestRow -> "fastest"
+        is HomeRow.AdRow -> "native_ad"
     }
 
     override fun getItemViewType(position: Int): Int = when (items[position]) {
         is HomeRow.Header -> VIEW_TYPE_HEADER
         is HomeRow.ServerRow -> VIEW_TYPE_SERVER
         is HomeRow.FastestRow -> VIEW_TYPE_FASTEST
+        is HomeRow.AdRow -> VIEW_TYPE_AD
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
         return when (viewType) {
             VIEW_TYPE_HEADER -> HeaderVH(ItemCountryBinding.inflate(LayoutInflater.from(parent.context), parent, false))
             VIEW_TYPE_FASTEST -> FastestVH(ItemFastestBinding.inflate(LayoutInflater.from(parent.context), parent, false))
+            VIEW_TYPE_AD -> AdVH(LayoutInflater.from(parent.context).inflate(R.layout.item_native_slot, parent, false) as android.view.ViewGroup)
             else -> ServerVH(ItemServerBinding.inflate(LayoutInflater.from(parent.context), parent, false))
         }
     }
@@ -94,6 +100,7 @@ class HomeListAdapter(
             is HomeRow.Header -> (holder as HeaderVH).bind(row)
             is HomeRow.ServerRow -> (holder as ServerVH).bind(row.server)
             is HomeRow.FastestRow -> (holder as FastestVH).bind()
+            is HomeRow.AdRow -> (holder as AdVH).bind()
         }
     }
 
@@ -106,6 +113,13 @@ class HomeListAdapter(
         val ctx = card.context
         card.setCardBackgroundColor(ContextCompat.getColor(ctx, if (connected) R.color.connectedTint else normalBg))
         card.strokeColor = ContextCompat.getColor(ctx, if (connected) R.color.statusOnline else R.color.divider)
+    }
+
+    /** Hosts the shared native ad view; the slot moves its view into whichever row is bound. */
+    inner class AdVH(private val container: android.view.ViewGroup) : RecyclerView.ViewHolder(container) {
+        fun bind() {
+            nativeSlot?.attachTo(container)
+        }
     }
 
     inner class FastestVH(val b: ItemFastestBinding) : RecyclerView.ViewHolder(b.root) {
