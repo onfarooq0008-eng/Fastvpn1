@@ -22,9 +22,8 @@
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
 
-# Smaller, harder to read output: move renamed classes into one package, allow access widening.
--repackageclasses ''
--allowaccessmodification
+# (-repackageclasses / -allowaccessmodification were removed: they break ad SDKs that use reflection or
+# package-private access, which made the signed release build crash on launch.)
 
 # Release builds don't need verbose/debug logging (warnings and errors are kept for crash diagnosis).
 -assumenosideeffects class android.util.Log {
@@ -61,3 +60,26 @@
 -dontwarn javax.lang.model.**
 -dontwarn com.google.errorprone.annotations.**
 -dontwarn org.checkerframework.**
+
+# Yandex Mediation loads its partner adapters and their networks BY NAME (reflection), so renaming/removing them
+# makes the release app crash or ads silently never load. Debug builds are not minified, which is why only release broke.
+-keep class com.yandex.mobile.ads.** { *; }
+-keep class com.yandex.mobile.ads.mediation.** { *; }
+-keep class com.google.android.gms.ads.** { *; }
+-keep class com.startapp.** { *; }
+-keep class com.applovin.** { *; }
+-keep class com.ironsource.** { *; }
+-keep class com.pangle.** { *; }
+-keep class com.bytedance.sdk.** { *; }
+-keep class com.mbridge.** { *; }
+-keep class com.chartboost.** { *; }
+-keep class com.tapjoy.** { *; }
+-keep class com.bigosdk.** { *; }
+-keep class sg.bigo.** { *; }
+-keep class com.moloco.** { *; }
+-keep class io.github.maticooads.** { *; }
+-keep class com.vungle.** { *; }
+-keep class com.my.target.** { *; }
+-keep class com.inmobi.** { *; }
+-keep class com.fyber.** { *; }
+-keepattributes *Annotation*,InnerClasses,EnclosingMethod,Exceptions
