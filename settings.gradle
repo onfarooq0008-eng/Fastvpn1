@@ -11,14 +11,6 @@ dependencyResolutionManagement {
         google()
         mavenCentral()
         maven { url 'https://jitpack.io' }
-        // Extra repositories required by the Yandex Mediation partner SDKs (from Yandex's integration guide).
-        maven { url 'https://android-sdk.is.com/' }                // IronSource
-        maven { url 'https://artifact.bytedance.com/repository/pangle' } // Pangle
-        maven { url 'https://sdk.tapjoy.com/' }                    // Tapjoy
-        maven { url 'https://artifactory.bidmachine.io/bidmachine' } // BidMachine
-        maven { url 'https://dl-maven-android.mintegral.com/repository/mbridge_android_sdk_oversea' } // Mintegral
-        maven { url 'https://cboost.jfrog.io/artifactory/chartboost-ads/' } // Chartboost
-        maven { url 'https://dl.appnext.com/' }                    // AppNext
     }
 }
 rootProject.name = "FastVPN"

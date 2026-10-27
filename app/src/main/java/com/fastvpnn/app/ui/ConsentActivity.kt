@@ -45,8 +45,12 @@ class ConsentActivity : AppCompatActivity() {
         }
 
         binding.buttonAgree.setOnClickListener {
-            AppSettings(this).hasAcceptedTerms = true
-            com.fastvpnn.app.ads.AdsManager.init(application) // no-op until ads are allowed in MainActivity's dialog
+            val settings = AppSettings(this)
+            settings.hasAcceptedTerms = true
+            // The screen above says in plain words that the app is ad-supported and that agreeing also allows
+            // Yandex to use the advertising ID, so this tap is the user's ad consent (passed to the SDK by AdsManager).
+            settings.adsAccepted = true
+            com.fastvpnn.app.ads.AdsManager.init(application)
             // This is the one path to MainActivity that doesn't go through
             // SplashActivity, so it's the only other place that needs to start
             // the server prefetch -- otherwise a brand-new user's very first

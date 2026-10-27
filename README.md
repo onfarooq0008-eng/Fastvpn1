@@ -9,7 +9,7 @@ yourself, with:
 - **Automatic device registration** via a backend API baked into the app
   itself — every user who installs the app gets your servers automatically,
   zero setup on their end. See `/backend`.
-- **100% free, ad-supported** — no paywall, one banner ad (Yandex Ads, with AdMob and Start.io as partners)
+- **100% free, ad-supported** — no paywall, ads served only by Yandex Ads (banner, native, disconnect interstitial)
 - **Search**, **dark mode**, **split tunneling**, a **connection timer + data
   usage** counter, and a **persistent notification with a one-tap Disconnect
   button** while connected
@@ -77,25 +77,24 @@ of the app uses it automatically, no per-device setup needed by anyone.
 
 ---
 
-## 4. Ads (Yandex Mobile Ads + AdMob + Start.io, banner only)
+## 4. Ads (Yandex Mobile Ads only)
 
-Served by the Yandex Mobile Ads SDK 8: a **banner** above the bottom navigation bar, a **native** ad card on the Home screen
-and another inside the Locations list (after the first two countries), and an **interstitial** shown right after the user taps
-Disconnect (at most once a minute). Google AdMob and
-Start.io are **mediation partners inside Yandex** (Yandex Mediation): you connect them in the Yandex dashboard. The app
-ships the all-in-one `mobileads-mediation` bundle, so any network you add to the ad unit later (AppLovin, Mintegral, Pangle,
-Chartboost, InMobi, Liftoff, ...) works without an app update. No rewarded ads. Unity Ads is not part of the app.
+Served by the **plain Yandex Mobile Ads SDK 8** (`com.yandex.android:mobileads`) -- the only ad SDK in the app: no mediation bundle,
+no AdMob, no Start.io, no Unity, no other network. Formats: a **banner** above the bottom navigation bar, a **native** ad card on the
+Home screen and another inside the Locations list (after the first two countries), and an **interstitial** shown right after the user
+taps Disconnect, and only gently: never on the first 2 disconnects, then every other one, at least 5 minutes apart and at most
+4 a day (numbers in `AdConfig.kt`). No rewarded ads.
 
 1. Ad unit IDs live in `app/src/main/java/com/fastvpnn/app/ads/AdConfig.kt` (banner `R-M-20279211-1`, native `R-M-20279211-2`,
-   interstitial `R-M-20279211-3`). In the Yandex dashboard add AdMob, Start.io (or any network) to each ad unit as mediation.
-2. AdMob: paste your AdMob App ID into `admobAppId` (same file). The default is Google's public sample ID, so the app
-   starts but earns nothing until you replace it.
-3. Debug builds always use Yandex's demo banner. To ship a release that shows only demo ads, set `USE_TEST_ADS` to `"true"`
+   interstitial `R-M-20279211-3`).
+2. Debug builds always use Yandex's demo ads. To ship a release that shows only demo ads, set `USE_TEST_ADS` to `"true"`
    in the release block of `app/build.gradle`.
-4. The SDK's automatic start is disabled in the manifest. The user must tap **Allow** on the ad dialog (`ads/AdsConsent.kt`);
-   only then does `AdsManager.init` start the SDK and pass the consent on to the partner networks.
-5. `backend/api/public/app-ads.txt`: paste the lines from the Yandex, AdMob and Start.io dashboards; redeploy the backend.
-6. Play Console: Ads declaration = "Yes, contains ads"; Data safety must list the advertising ID (shared with Yandex, Google and Start.io).
+3. There is no separate ads pop-up. The first-launch Terms screen (`ConsentActivity`, text in `strings.xml` `consent_body`) says the app
+   is ad-supported and that tapping **I Agree And Continue** also allows Yandex to use the advertising ID; that tap sets `adsAccepted`,
+   which `AdsManager.init` passes to Yandex as the consent flag on every launch. The SDK's automatic start is disabled in the manifest,
+   so no ad SDK runs before that screen is accepted.
+4. `backend/api/public/app-ads.txt`: paste the line(s) from the Yandex dashboard; redeploy the backend.
+5. Play Console: Ads declaration = "Yes, contains ads"; Data safety must list the advertising ID (shared with Yandex).
 
 ---
 

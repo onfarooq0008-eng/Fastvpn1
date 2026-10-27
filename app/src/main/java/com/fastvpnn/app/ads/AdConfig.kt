@@ -5,16 +5,13 @@ import com.fastvpnn.app.BuildConfig
 /**
  * THE one place for the ad settings.
  *
- * Ads in this app (all served by the Yandex Mobile Ads SDK; Google AdMob, Start.io and any other network are
- * Yandex Mediation partners you switch on per ad unit in the Yandex dashboard -- no code change needed):
+ * Ads in this app (all served by the Yandex Mobile Ads SDK -- the only ad SDK in the app, no mediation):
  *  - BANNER        : one adaptive banner above the bottom navigation bar.
  *  - NATIVE        : one card on the Home screen and one inside the Locations list.
  *  - INTERSTITIAL  : full-screen ad shown right after the user taps Disconnect.
  *
  * Test ads: debug builds always use Yandex's public demo units. Release builds use the real units below,
  * unless USE_TEST_ADS is set to true for the release build type in app/build.gradle.
- *
- * The AdMob App ID (needed by the Google adapter) is set in app/build.gradle as the `admobAppId` manifest placeholder.
  */
 object AdConfig {
     // ---- real Yandex ad units ----
@@ -38,6 +35,19 @@ object AdConfig {
     const val RETRY_BASE_MS = 60_000L
     const val RETRY_MAX_TRIES = 5
 
-    /** The disconnect interstitial is shown at most once per this interval, so quick connect/disconnect taps are not punished with ads. */
-    const val INTERSTITIAL_MIN_INTERVAL_MS = 60_000L
+    // ---- How often the disconnect interstitial may appear (all in one place; raise numbers to show it LESS) ----
+    /** Never on the user's first N disconnects after install: let them try the app first. */
+    const val INTERSTITIAL_SKIP_FIRST_DISCONNECTS = 2
+
+    /** After that, only on every Nth disconnect (2 = every other disconnect). */
+    const val INTERSTITIAL_EVERY_N_DISCONNECTS = 2
+
+    /** At least this long between two interstitials, even across app restarts (5 minutes). */
+    const val INTERSTITIAL_MIN_INTERVAL_MS = 5 * 60_000L
+
+    /** Hard cap per calendar day (UTC). */
+    const val INTERSTITIAL_MAX_PER_DAY = 4
+
+    /** Debug / test-ads builds ignore the rules above (so you can see the ad) except for this short gap. */
+    const val INTERSTITIAL_TEST_INTERVAL_MS = 10_000L
 }

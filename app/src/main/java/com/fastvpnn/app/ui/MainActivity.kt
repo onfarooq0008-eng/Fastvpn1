@@ -23,7 +23,6 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.SimpleItemAnimator
 import com.fastvpnn.app.BuildConfig
 import com.fastvpnn.app.R
-import com.fastvpnn.app.ads.AdsConsent
 import com.fastvpnn.app.ads.AdsManager
 import com.fastvpnn.app.ads.NativeAdSlot
 import com.fastvpnn.app.data.AppSettings
@@ -200,11 +199,9 @@ class MainActivity : AppCompatActivity() {
         // Idempotent: first-run users reach here without FastVpnApp having started ads yet.
         AdsManager.init(application)
         AdsManager.showBanner(this, binding.adContainer)
-        // Native ads start loading once the SDK is up (i.e. after the user allowed ads).
+        // Native ads start loading once the SDK is up.
         nativeHome.start()
         nativeLocations.start()
-        // Ads are required to use the app: ask until the user allows them (also after rotation / process restart).
-        if (AdsConsent.needsPrompt(this)) AdsConsent.showDialog(this)
 
         // Pick up the fetch SplashActivity already started while its logo was
         // showing, so this first load doesn't start the network call from zero.

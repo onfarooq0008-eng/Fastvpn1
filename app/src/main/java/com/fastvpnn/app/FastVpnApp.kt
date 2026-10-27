@@ -9,9 +9,8 @@ class FastVpnApp : Application() {
     override fun onCreate() {
         super.onCreate()
         applyThemeMode()
-        // Ads must not load before the user has accepted the consent screen (ConsentActivity). Returning
+        // Ads must not load before the user has accepted the Terms screen (ConsentActivity). Returning
         // users get the ad SDK started here; first-run users get it from ConsentActivity's "I Agree" button.
-        // init() itself also waits for the user's "Allow ads" answer.
         if (AppSettings(this).hasAcceptedTerms) AdsManager.init(this)
     }
 

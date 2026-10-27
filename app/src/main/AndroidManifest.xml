@@ -30,6 +30,8 @@
         </intent>
     </queries>
 
+    <!-- tools:replace on networkSecurityConfig is a safeguard: if any library ever ships its own network security config,
+         the app's HTTPS-only config (res/xml/network_security_config.xml) wins instead of failing the manifest merge. -->
     <application
         android:hardwareAccelerated="true"
         android:name=".FastVpnApp"
@@ -46,14 +48,10 @@
 
 
         <!-- Ads. The Yandex SDK would otherwise start by itself at launch; we start it ourselves (AdsManager.init)
-             only after the user has tapped "Allow" on the ad dialog, so no ad network runs before consent. -->
+             only after the user has tapped "Allow" on the ad dialog, so no ad SDK runs before consent. -->
         <meta-data
             android:name="com.yandex.mobile.ads.AUTOMATIC_SDK_INITIALIZATION"
             android:value="false" />
-        <!-- Google AdMob App ID (an AdMob partner inside Yandex Mediation). Set in app/build.gradle: admobAppId. -->
-        <meta-data
-            android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="${admobAppId}" />
 
         <activity
             android:name=".ui.SplashActivity"

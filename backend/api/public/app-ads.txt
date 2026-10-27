@@ -3,8 +3,6 @@
 # Google Play listing (https://fastvpnn.pp.ua/app-ads.txt). Ad networks only bid on apps whose
 # app-ads.txt authorises them, so without these lines there is little or no ad fill.
 #
-# Add one line per network, copied from each dashboard (do NOT guess the IDs):
-#   - Yandex:  Yandex Partner / Boost dashboard -> your app -> app-ads.txt lines
-#   - Google AdMob:  AdMob -> Apps -> your app -> app-ads.txt  (google.com, pub-XXXXXXXXXXXXXXXX, DIRECT, f08c47fec0942fa0)
-#   - Start.io:  Start.io portal -> Apps -> app-ads.txt
-# Then redeploy the backend so the file is live at the URL above.
+# The app uses Yandex Ads only. Paste the line(s) shown in the Yandex Partner / Boost dashboard
+# (your app -> app-ads.txt) below this comment -- do NOT guess them. Then redeploy the backend so the
+# file is live at the URL above.

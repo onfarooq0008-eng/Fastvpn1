@@ -11,6 +11,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.Toast
+import com.fastvpnn.app.data.AppSettings
 import com.yandex.mobile.ads.banner.BannerAdEventListener
 import com.yandex.mobile.ads.banner.BannerAdSize
 import com.yandex.mobile.ads.banner.BannerAdView
@@ -26,21 +27,22 @@ import com.yandex.mobile.ads.interstitial.InterstitialAdLoader
 import java.lang.ref.WeakReference
 
 /**
- * The ad entry point: Yandex banner + disconnect interstitial (native ads live in [NativeAdSlot]). Google AdMob, Start.io
- * and the other networks are mediation partners behind Yandex, configured in the Yandex dashboard.
+ * The ad entry point: Yandex banner + disconnect interstitial (native ads live in [NativeAdSlot]). Yandex is the only
+ * ad SDK in the app.
  *
- *   AdsManager.init(app)                    -- safe to call repeatedly; starts the SDK once the user has allowed ads
+ *   AdsManager.init(app)                    -- safe to call repeatedly; starts the SDK (after the Terms screen)
  *   AdsManager.showBanner(activity, view)   -- view stays hidden until an ad has really loaded
  *   AdsManager.hideBanner(view)             -- call from onDestroy
- *   AdsManager.showInterstitial(activity)   -- call right after a user-initiated disconnect (rate-limited, no-op if no ad is ready)
+ *   AdsManager.showInterstitial(activity)   -- call right after a user-initiated disconnect (frequency-capped, see AdConfig; no-op if no ad is ready)
  *   AdsManager.whenReady(runnable)          -- runs once the SDK is up (used by native ad slots)
  *
- * The SDK's own automatic start is switched off in the manifest, so nothing from Yandex, AdMob or Start.io
- * runs before the user has said yes. Everything here runs on the main thread and nothing can throw into UI code.
+ * The SDK's own automatic start is switched off in the manifest, so nothing from Yandex
+ * runs before the user has accepted the Terms screen. Everything here runs on the main thread and nothing can throw into UI code.
  */
 object AdsManager {
 
     private const val TAG = "FastVPN-Ads"
+    private const val DAY_MS = 24L * 60 * 60 * 1000
 
     private enum class State { NOT_STARTED, INITIALIZING, READY, FAILED }
 
@@ -64,7 +66,6 @@ object AdsManager {
     private var shownInterstitial: InterstitialAd? = null
     private var interstitialLoading = false
     private var interstitialRetries = 0
-    private var lastInterstitialShownAt = 0L
 
     // ---- "SDK is ready" callbacks ----
     private val readyListeners = mutableListOf<Runnable>()
@@ -89,15 +90,16 @@ object AdsManager {
 
     // ============================ init ============================
 
-    /** Does nothing until the user has allowed ads (see AdsConsent). Never blocks: the SDK starts asynchronously. */
+    /** Starts the SDK (once). Callers only reach this after the Terms screen has been accepted. Never blocks: the SDK starts asynchronously. */
     fun init(app: Application) {
-        if (state != State.NOT_STARTED || !AdsConsent.isAccepted(app)) return
+        if (state != State.NOT_STARTED) return
         state = State.INITIALIZING
         appContext = app
         try {
-            // The user allowed ads in the consent dialog. Must be set BEFORE initialize(); Yandex hands it on to
-            // the mediation partners (AdMob, Start.io -- Start.io then skips its own consent pop-up).
-            YandexAds.setUserConsent(true)
+            // Tell Yandex what the user really agreed to (must be set BEFORE initialize(), on every launch): true if they
+            // tapped "I Agree" on the Terms screen (which discloses the ads) or allowed ads in the older dialog; otherwise
+            // false, so Yandex does not use their personal data. Ads are requested either way.
+            YandexAds.setUserConsent(AppSettings(app).adsAccepted)
             YandexAds.initialize(app) {
                 state = State.READY
                 Log.i(TAG, "Yandex Ads initialized (test=${AdConfig.isTestMode})")
@@ -148,16 +150,37 @@ object AdsManager {
         }
     }
 
-    /** Shows the preloaded interstitial, if there is one and the last one was long enough ago. Never blocks, never throws. */
+    /**
+     * Call once per user-initiated disconnect. Shows the preloaded interstitial only when the gentle frequency rules in
+     * [AdConfig] allow it (skip the first disconnects, then every Nth, minimum gap, daily cap). Never blocks, never throws.
+     */
     fun showInterstitial(activity: Activity) {
         if (state != State.READY || activity.isFinishing || activity.isDestroyed) return
+        val settings = AppSettings(activity)
+        val now = System.currentTimeMillis()
+        val count = settings.interstitialDisconnects + 1
+        settings.interstitialDisconnects = count // counted even when no ad is shown
+        val sinceLast = now - settings.interstitialLastShownMs
+        val neverShown = settings.interstitialLastShownMs == 0L
+        if (AdConfig.isTestMode) {
+            if (!neverShown && sinceLast in 0 until AdConfig.INTERSTITIAL_TEST_INTERVAL_MS) return
+        } else {
+            if (count <= AdConfig.INTERSTITIAL_SKIP_FIRST_DISCONNECTS) return
+            if ((count - AdConfig.INTERSTITIAL_SKIP_FIRST_DISCONNECTS) % AdConfig.INTERSTITIAL_EVERY_N_DISCONNECTS != 0) return
+            // sinceLast < 0 means the clock was set back: be conservative and wait.
+            if (!neverShown && (sinceLast < 0 || sinceLast < AdConfig.INTERSTITIAL_MIN_INTERVAL_MS)) return
+            val today = now / DAY_MS
+            if (settings.interstitialDay != today) {
+                settings.interstitialDay = today
+                settings.interstitialShownToday = 0
+            }
+            if (settings.interstitialShownToday >= AdConfig.INTERSTITIAL_MAX_PER_DAY) return
+        }
         val ad = interstitial
         if (ad == null) {
             loadInterstitial() // not ready yet: try to have one for next time
             return
         }
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (lastInterstitialShownAt != 0L && now - lastInterstitialShownAt < AdConfig.INTERSTITIAL_MIN_INTERVAL_MS) return
         try {
             interstitial = null
             shownInterstitial = ad
@@ -173,7 +196,13 @@ object AdsManager {
                 override fun onAdClicked() {}
                 override fun onAdImpression(impressionData: ImpressionData?) {}
             })
-            lastInterstitialShownAt = now
+            val today = now / DAY_MS
+            if (settings.interstitialDay != today) {
+                settings.interstitialDay = today
+                settings.interstitialShownToday = 0
+            }
+            settings.interstitialShownToday += 1
+            settings.interstitialLastShownMs = now
             ad.show(activity)
         } catch (t: Throwable) {
             Log.w(TAG, "interstitial show crashed: ${t.javaClass.simpleName}")

@@ -34,12 +34,8 @@ android {
         // billing in the app yet, so they stay hidden. Flip to true once Premium really exists.
         buildConfigField "boolean", "SHOW_PREMIUM", "false"
 
-        // ---- Ads: Yandex Mobile Ads SDK (AdMob, Start.io and other networks are mediation partners inside Yandex) ----
+        // ---- Ads: Yandex Mobile Ads SDK only (no mediation, no other ad network SDK in the app) ----
         // Ad unit IDs (banner / native / interstitial) are in app/src/main/java/com/fastvpnn/app/ads/AdConfig.kt.
-        // Your AdMob App ID (ca-app-pub-xxxxxxxxxxxxxxxx~yyyyyyyyyy). The Google SDK crashes at start-up without a
-        // valid ID, so this is Google's public SAMPLE ID until you paste your own -- REPLACE IT.
-        manifestPlaceholders.put("admobAppId", "ca-app-pub-3940256099942544~3347511713")
-
     }
 
     signingConfigs {
@@ -97,11 +93,9 @@ android {
 
 
 configurations.configureEach {
-    // Keep Unity Ads out of the app (the all-in-one Yandex bundle would otherwise bring its SDK + adapter along).
-    exclude group: 'com.unity3d.ads'
-    exclude group: 'com.yandex.ads.mediation', module: 'mobileads-unityads'
-    // The Yandex SDK drags in Jetpack Compose lifecycle helpers (for its optional Compose banner). This app has no Compose UI,
-    // and lifecycle-runtime-compose 2.11.0 demands compileSdk 37 + AGP 9.1, which fails the build (checkDebugAarMetadata).
+    // Safety net: this app has no Jetpack Compose UI, and lifecycle-runtime-compose 2.11.0 demands compileSdk 37 + AGP 9.1,
+    // which would fail the build (checkDebugAarMetadata) if any library ever pulled it in again. (The plain Yandex SDK does
+    // not declare it; it came in through the old mediation bundle.)
     exclude group: 'androidx.lifecycle', module: 'lifecycle-runtime-compose'
     exclude group: 'androidx.lifecycle', module: 'lifecycle-runtime-compose-android'
 }
@@ -124,12 +118,9 @@ dependencies {
     // Official WireGuard userspace backend for Android
     implementation 'com.wireguard.android:tunnel:1.0.20260102'
 
-    // Ads: Yandex Mobile Ads SDK 8 with ALL Yandex Mediation adapters in one artifact (needs AGP 8.7+, minSdk 21+,
-    // compileSdk 35+ -- all met). One banner. Any network you add to the banner in the Yandex dashboard (AdMob,
-    // Start.io, AppLovin, Mintegral, Pangle, Chartboost, InMobi, Liftoff, ...) then works with no app update.
-    // It pulls in com.yandex.android:mobileads 8.6.0 itself. Unity Ads is stripped out again in the
-    // configurations block below, so Unity stays out of the app even though this bundle contains an adapter for it.
-    implementation 'com.yandex.android:mobileads-mediation:8.6.0.0'
+    // Ads: the plain Yandex Mobile Ads SDK 8 (needs AGP 8.7+, minSdk 21+, compileSdk 35+ -- all met). This is the ONLY
+    // ad SDK in the app: no mediation bundle and no partner adapters (AdMob, Start.io, AppLovin, Unity, ...).
+    implementation 'com.yandex.android:mobileads:8.6.0'
 
     // Networking (backend API + ping)
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'

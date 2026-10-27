@@ -97,7 +97,8 @@ class NativeAdSlot(private val activity: Activity, private val onChanged: () -> 
                 .setWarningView(v.findViewById<TextView>(R.id.native_warning))
                 .build()
             val result = ad.bindNativeAd(binder)
-            // bindNativeAd reports success/failure as a result object; judged by name so this file does not depend on its exact type.
+            // bindNativeAd returns an AdBindingResult (Success / Failure), judged by name so this file does not depend on its exact
+            // type. That only works if R8 does not rename the Yandex classes -- see the keep rule in proguard-rules.pro.
             if (result.toString().contains("Failure", ignoreCase = true) || result.javaClass.simpleName.contains("Failure")) {
                 Log.i(TAG, "native bind failed: $result")
                 scheduleRetry()
