@@ -1,8 +1,0 @@
-# app-ads.txt for fastvpnn.pp.ua
-# This file must be served from the root of the website domain that is set as the "Website" on the
-# Google Play listing (https://fastvpnn.pp.ua/app-ads.txt). Ad networks only bid on apps whose
-# app-ads.txt authorises them, so without these lines there is little or no ad fill.
-#
-# The app uses Yandex Ads only. Paste the line(s) shown in the Yandex Partner / Boost dashboard
-# (your app -> app-ads.txt) below this comment -- do NOT guess them. Then redeploy the backend so the
-# file is live at the URL above.
